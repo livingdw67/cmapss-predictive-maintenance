@@ -1,0 +1,18 @@
+# Environments
+venv/
+env/
+__pycache__/
+*.pyc
+
+# Credentials and Secrets
+.env
+
+# Data Files
+data/
+*.csv
+*.txt
+*.zip
+
+# IDE Files
+.vscode/
+.cursor/
