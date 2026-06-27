@@ -24,7 +24,7 @@ To operationalize the feature store, this project includes a complete modeling w
 * **Class Imbalance Experimentation:** Compares manual SMOTE generation, 6x undersampling, and `scale_pos_weight`, proving the baseline weighting strategy optimal for this dataset.
 * **Model Registry:** Demonstrates MLOps best practices by versioning and logging champion models directly into Snowflake's native ML Registry.
 
-**[View the Modeling Notebook here](Snowflake_Registered_Binary_classifiers.ipynb)**
+**[View the experiment results here](results.md)**
 
 ## Technology Stack
 * **Data Platform:** Snowflake (SQL, Snowpark ML)
@@ -44,5 +44,4 @@ To operationalize the feature store, this project includes a complete modeling w
 ├── 05_build_core.py            # Star schema generation (Dim/Fact tables)
 ├── 06_build_marts.py           # RUL target variable calculation
 ├── 07_build_feature_store.py   # Rolling window feature engineering via Window Functions
-├── 08_feature_importance.py    # Generates Pearson Correlation and Random Forest rankings
-└── Snowflake_Registered_Binary_classifiers.ipynb    # XGBoost tandem classifiers & model registration
+└── 08_build_register_classifiers.ipynb    # XGBoost tandem classifiers & model registration
