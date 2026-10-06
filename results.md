@@ -108,4 +108,4 @@ Models are versioned in `PREDICTIVE_MAINTENANCE.ML_MODELS` with computed metrics
 
 * **Normalize by operating condition.** FD002 and FD004 run under six flight conditions, which shift raw sensor values; per-condition normalization is the standard next improvement.
 * **Use more sensors.** Only 3 of 21 sensors feed the models today.
-* **Time-to-failure modeling.** A survival or Weibull view of the run-to-failure data would complement the two classifiers.
+* **Time-to-failure modeling:** done. See `09_weibull_reliability_analysis.ipynb` for the Weibull fleet reliability analysis.

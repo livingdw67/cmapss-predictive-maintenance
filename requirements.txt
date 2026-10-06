@@ -5,3 +5,6 @@ numpy
 scikit-learn
 xgboost
 matplotlib
+scipy
+lifelines
+jupyter

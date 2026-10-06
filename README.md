@@ -36,12 +36,23 @@ To operationalize the feature store, this project includes a complete modeling w
 
 > **v2 correction:** an earlier version merged engines from different source files that shared an ID number, which mislabeled 55% of rows. That is fixed, and all results were regenerated. See [results.md](results.md) for details.
 
+## Reliability Analysis: Weibull Fleet Model
+
+The classifiers decide *which engine* to pull. **[09_weibull_reliability_analysis.ipynb](09_weibull_reliability_analysis.ipynb)** answers the fleet-planning questions: how long engines last, how failure risk grows with age, and when monitoring must be in place.
+
+* **Wear-out failure:** Weibull shape β = 2.9–4.4 across datasets (β > 1 means risk rises with age). Characteristic life η ≈ 225 cycles (one fault mode) and ≈ 274 cycles (two fault modes); B10 life ≈ 135–140 cycles.
+* **Fault modes matter, operating conditions don't:** log-rank tests show no lifetime difference across 1 vs. 6 operating conditions (p = 0.73–0.87), but engines with two fault modes live longer and less predictably (p < 0.001), so the fleet is planned as two populations.
+* **Failure-free period:** no engine fails before about 125 cycles. A three-parameter Weibull captures this (AIC about 100 points lower) and shows a more gradual wear-out phase beyond it (β ≈ 1.6–1.8).
+* **Censoring trap:** treating the truncated test engines as ordinary censored data overstates characteristic life by **5–15%**, because each trajectory was cut off at a random fraction of that engine's own life (censoring age correlates 0.56–0.88 with true life). A simulation confirms the mechanism: unbiased under independent censoring, biased when censoring tracks lifetime.
+* **Age vs. sensors:** age alone flags engines within 50 cycles of failure with AUC 0.72–0.86 and misses remaining life by 33–55 cycles on average, which is why sensor-based condition monitoring drives individual removals and Weibull sets the fleet-level window.
+
 ## Run It
 
 ```bash
 pip install -r requirements.txt
 python 01_fetch_data.py       # Download NASA C-MAPSS into data/raw
 python evaluate_local.py      # Reproduce the feature store and models locally (no Snowflake needed)
+jupyter notebook 09_weibull_reliability_analysis.ipynb   # Fleet reliability analysis
 ```
 
 To run the full Snowflake pipeline, add Snowflake credentials to a `.env` file and run scripts `02` through `07` in order, then the `08` notebook in Snowflake.
@@ -50,6 +61,7 @@ To run the full Snowflake pipeline, add Snowflake credentials to a `.env` file a
 * **Data Platform:** Snowflake (SQL, Snowpark ML)
 * **Orchestration & Extraction:** Python, `snowflake-connector-python`
 * **Data Science & ML:** `xgboost`, `pandas`, `scikit-learn`, `matplotlib`
+* **Reliability & Survival Analysis:** `lifelines` (Weibull, Kaplan–Meier, log-rank), `scipy`
 * **Environment Management:** `python-dotenv`
 
 ## Project Structure
@@ -65,6 +77,7 @@ To run the full Snowflake pipeline, add Snowflake credentials to a `.env` file a
 ├── 06_build_marts.py           # RUL target variable calculation
 ├── 07_build_feature_store.py   # Rolling window feature engineering via Window Functions
 ├── 08_build_register_classifiers.ipynb    # XGBoost tandem classifiers & model registration
+├── 09_weibull_reliability_analysis.ipynb  # Weibull fleet reliability analysis
 ├── evaluate_local.py           # Snowflake-free reproduction of the pipeline and models
 ├── results.md                  # Experiment results
 └── requirements.txt            # Python dependencies
