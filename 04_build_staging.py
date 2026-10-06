@@ -31,7 +31,9 @@ def build_staging_layer():
             CREATE OR REPLACE TABLE STG_TELEMETRY AS 
             SELECT 
                 -- Identifiers
-                CAST(id AS INTEGER) AS engine_id,
+                -- Engine numbers restart at 1 in each FD00x file, so the dataset is part of the key
+                REGEXP_SUBSTR(source_file, 'FD00[1-4]') AS dataset,
+                REGEXP_SUBSTR(source_file, 'FD00[1-4]') || '_' || LPAD(id, 3, '0') AS engine_id,
                 CAST(cycle AS INTEGER) AS cycle,
                 
                 -- Operational Settings

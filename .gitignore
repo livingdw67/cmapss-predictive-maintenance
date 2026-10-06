@@ -16,3 +16,5 @@ data/
 # IDE Files
 .vscode/
 .cursor/
+# Allow dependency list despite the *.txt rule above
+!requirements.txt

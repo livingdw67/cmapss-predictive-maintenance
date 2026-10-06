@@ -8,7 +8,8 @@ def download_and_extract_cmapss():
     data_dir = os.path.join(base_dir, 'data', 'raw')
     os.makedirs(data_dir, exist_ok=True)
     
-    url = "https://ti.arc.nasa.gov/m/project/prognostic-repository/CMAPSSData.zip"
+    # The original ti.arc.nasa.gov link now serves an HTML page; data.nasa.gov hosts the same archive
+    url = "https://data.nasa.gov/docs/legacy/CMAPSSData.zip"
     zip_path = os.path.join(data_dir, 'CMAPSSData.zip')
     
     print("Downloading CMAPSS dataset from NASA...")
@@ -22,6 +23,9 @@ def download_and_extract_cmapss():
         with urllib.request.urlopen(req) as response, open(zip_path, 'wb') as out_file:
             out_file.write(response.read())
             
+        if not zipfile.is_zipfile(zip_path):
+            raise ValueError(f"Downloaded file is not a zip archive. Check that {url} still hosts the dataset.")
+
         print("Download complete. Extracting files...")
         
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:

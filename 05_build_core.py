@@ -41,7 +41,8 @@ def build_core_layer():
         dim_engine_sql = """
             CREATE OR REPLACE TABLE DIM_ENGINE AS
             SELECT DISTINCT 
-                engine_id
+                engine_id,
+                dataset
             FROM PREDICTIVE_MAINTENANCE.STAGING.STG_TELEMETRY
             ORDER BY engine_id;
         """

@@ -43,7 +43,8 @@ def load_raw_data():
                 sensor_6 STRING, sensor_7 STRING, sensor_8 STRING, sensor_9 STRING, sensor_10 STRING,
                 sensor_11 STRING, sensor_12 STRING, sensor_13 STRING, sensor_14 STRING, sensor_15 STRING,
                 sensor_16 STRING, sensor_17 STRING, sensor_18 STRING, sensor_19 STRING, sensor_20 STRING,
-                sensor_21 STRING
+                sensor_21 STRING,
+                source_file STRING  -- e.g. train_FD002.txt.gz; engine numbers restart in every file
             )
         """)
 
@@ -55,7 +56,8 @@ def load_raw_data():
             FROM (
                 SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                        $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-                       $21, $22, $23, $24, $25, $26
+                       $21, $22, $23, $24, $25, $26,
+                       METADATA$FILENAME
                 FROM @cmapss_stage
             )
             PATTERN='.*train_FD.*\\.txt\\.gz'
