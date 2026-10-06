@@ -34,7 +34,6 @@ To operationalize the feature store, this project includes a complete modeling w
 
 **[Full experiment results](results.md)**
 
-> **v2 correction:** an earlier version merged engines from different source files that shared an ID number, which mislabeled 55% of rows. That is fixed, and all results were regenerated. See [results.md](results.md) for details.
 
 ## Reliability Analysis: Weibull Fleet Model
 
