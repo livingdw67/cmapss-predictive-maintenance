@@ -106,6 +106,6 @@ Models are versioned in `PREDICTIVE_MAINTENANCE.ML_MODELS` with computed metrics
 
 ## Next Steps
 
-* **Normalize by operating condition.** FD002 and FD004 run under six flight conditions, which shift raw sensor values; per-condition normalization is the standard next improvement.
-* **Use more sensors.** Only 3 of 21 sensors feed the models today.
+* **Normalize by operating condition and use more sensors:** done in `10_sensor_graph_gnn.py`. With 14 condition-normalized sensors and 30 cycles of history, XGBoost reaches test F2 0.931 (Early Warning) and 0.929 (Critical Action). A graph neural network on the same inputs ties it; see the README.
+* **Promote the improved XGBoost** to the Snowflake feature store and registry (per-condition normalization as a SQL layer).
 * **Time-to-failure modeling:** done. See `09_weibull_reliability_analysis.ipynb` for the Weibull fleet reliability analysis.

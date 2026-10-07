@@ -45,6 +45,47 @@ The classifiers decide *which engine* to pull. **[09_weibull_reliability_analysi
 * **Censoring trap:** treating the truncated test engines as ordinary censored data overstates characteristic life by **5–15%**, because each trajectory was cut off at a random fraction of that engine's own life (censoring age correlates 0.56–0.88 with true life). A simulation confirms the mechanism: unbiased under independent censoring, biased when censoring tracks lifetime.
 * **Age vs. sensors:** age alone flags engines within 50 cycles of failure with AUC 0.72–0.86 and misses remaining life by 33–55 cycles on average, which is why sensor-based condition monitoring drives individual removals and Weibull sets the fleet-level window.
 
+## Graph Neural Network: Sensors as a Graph
+
+**[10_sensor_graph_gnn.py](10_sensor_graph_gnn.py)** treats each engine snapshot as a graph. The 14 informative sensors are nodes, each carrying its last 30 cycles of readings, normalized within its operating condition. A GRU encodes each sensor's history, two GATv2 attention layers pass messages between sensors, and a multitask head predicts RUL plus both maintenance flags. Same engine splits, same validation-tuned F2 thresholds, test engines scored once.
+
+**Graph design.** Four edge sets, so the graph itself is tested rather than assumed:
+* **Physics:** sensors on the same component, on adjacent gas-path stages (fan → LPC → HPC → combustor → HPT → LPT), on the same shaft, or linked by bleed flows
+* **Correlation:** each sensor linked to its 3 most correlated sensors on training engines
+* **Full:** every pair linked; attention must find the structure
+* **None:** self-loops only, so no message passing (ablation)
+
+### Results (held-out test engines; GNN rows are mean ± std over 3 seeds)
+
+| Model | Early Warning F2 | Critical Action F2 | RUL RMSE (cycles) |
+|-------|------------------|--------------------|-------------------|
+| XGBoost, original 8 features | 0.857 | 0.837 | n/a |
+| XGBoost, same inputs as GNN (flattened) | **0.931** | 0.929 | **14.24** |
+| GNN, no edges | 0.930 ± 0.002 | 0.933 ± 0.000 | 14.93 ± 0.10 |
+| GNN, correlation graph | **0.931** ± 0.001 | 0.934 ± 0.001 | 14.37 ± 0.16 |
+| GNN, physics graph | 0.930 ± 0.002 | 0.934 ± 0.002 | 14.30 ± 0.30 |
+| GNN, fully connected | 0.929 ± 0.003 | **0.936** ± 0.003 | 14.61 ± 0.21 |
+
+**Findings**
+
+* **Better inputs did most of the work.** Normalizing sensors within each operating condition, using 14 sensors instead of 3, and giving the model 30 cycles of history lifts XGBoost from 0.857 to 0.931 F2 (Early Warning) and from 0.837 to 0.929 (Critical Action), with no deep learning at all.
+* **The GNN ties a strong XGBoost; it does not beat it.** On identical inputs, the GNN matches Early Warning F2 and edges Critical Action by about 0.005 F2, trading some precision (0.79 vs 0.81) for recall (0.98 vs 0.96). RUL error is the same within noise (14.30 vs 14.24).
+* **Message passing helps, if the graph is sparse.** Within the GNN, the correlation and physics graphs cut RUL error by about 0.6 cycles versus no edges, and every seed with a sparse graph beat every seed without one. The fully connected graph recovers only half of that gain. Physics and correlation graphs are tied within seed noise, so domain knowledge reproduced what the data already shows rather than adding to it.
+* **Recommendation:** keep XGBoost (on the improved inputs) in production. It matches the GNN, trains in seconds rather than 10–15 minutes per run on CPU, and is easier to explain to maintenance engineers. A GNN would earn its complexity where the graph varies: fleets with different sensor sets per engine type, or localizing which component is failing.
+
+**What attention learned.** As engines approach failure (RUL ≤ 15 vs. healthy), the physics GNN shifts attention toward two sensors as message sources: HPC static pressure (Ps30 → bleed enthalpy rises from 0.24 to 0.35; Ps30 → fuel flow ratio and HPC outlet temperature also rise) and LPT outlet temperature (T50 → fan speeds and coolant bleeds, 0.31–0.36 to 0.40–0.45). Both track high-pressure compressor degradation, the fault mode present in all four datasets. Attention weights indicate where the model looks, not proof of cause.
+
+**NASA benchmark.** RMSE (cycles) on the official test trajectories, scored at each engine's last cycle against true RUL capped at 130. One model is trained on all four datasets pooled (425 engines), not tuned per dataset, and the official test set was never used for any choice.
+
+| Model | FD001 | FD002 | FD003 | FD004 |
+|-------|-------|-------|-------|-------|
+| XGBoost, same inputs | **13.2** | **14.6** | 15.7 | 15.9 |
+| GNN, no edges | 14.3 | 15.1 | 15.1 | 16.1 |
+| GNN, physics graph | 14.8 | 15.1 | **14.8** | 15.3 |
+| GNN, correlation graph | 14.8 | 15.3 | 15.2 | **15.2** |
+
+[Raw results for every seed](gnn_results.json), including recall, precision, PR-AUC, thresholds and the NASA asymmetric score.
+
 ## Run It
 
 ```bash
@@ -52,6 +93,8 @@ pip install -r requirements.txt
 python 01_fetch_data.py       # Download NASA C-MAPSS into data/raw
 python evaluate_local.py      # Reproduce the feature store and models locally (no Snowflake needed)
 jupyter notebook 09_weibull_reliability_analysis.ipynb   # Fleet reliability analysis
+python 10_sensor_graph_gnn.py # GNN vs. XGBoost ablation (about 2.5 hours on 8 CPU cores; --quick for a 10-minute check)
+pytest tests                  # Unit tests for windows, graphs and batching
 ```
 
 To run the full Snowflake pipeline, add Snowflake credentials to a `.env` file and run scripts `02` through `07` in order, then the `08` notebook in Snowflake.
@@ -60,6 +103,7 @@ To run the full Snowflake pipeline, add Snowflake credentials to a `.env` file a
 * **Data Platform:** Snowflake (SQL, Snowpark ML)
 * **Orchestration & Extraction:** Python, `snowflake-connector-python`
 * **Data Science & ML:** `xgboost`, `pandas`, `scikit-learn`, `matplotlib`
+* **Deep Learning:** PyTorch, PyTorch Geometric (GATv2), GRU sequence encoders
 * **Reliability & Survival Analysis:** `lifelines` (Weibull, Kaplan–Meier, log-rank), `scipy`
 * **Environment Management:** `python-dotenv`
 
@@ -77,6 +121,10 @@ To run the full Snowflake pipeline, add Snowflake credentials to a `.env` file a
 ├── 07_build_feature_store.py   # Rolling window feature engineering via Window Functions
 ├── 08_build_register_classifiers.ipynb    # XGBoost tandem classifiers & model registration
 ├── 09_weibull_reliability_analysis.ipynb  # Weibull fleet reliability analysis
+├── 10_sensor_graph_gnn.py      # Sensor-graph GNN vs. XGBoost ablation
+├── gnn/                        # Condition-normalized windows, sensor graphs, GATv2 model
+├── tests/                      # Unit tests for the GNN data and model code
+├── gnn_results.json            # Per-seed GNN and baseline results
 ├── evaluate_local.py           # Snowflake-free reproduction of the pipeline and models
 ├── results.md                  # Experiment results
 └── requirements.txt            # Python dependencies

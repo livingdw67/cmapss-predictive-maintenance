@@ -8,3 +8,6 @@ matplotlib
 scipy
 lifelines
 jupyter
+torch
+torch_geometric
+pytest
