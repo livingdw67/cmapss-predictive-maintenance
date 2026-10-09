@@ -14,7 +14,7 @@ def upload_raw_data_to_snowflake():
     try:
         conn = snowflake.connector.connect(
             user=os.getenv('SNOWFLAKE_USER'),
-            password=os.getenv('SNOWFLAKE_PASSWORD'),
+            private_key_file=os.getenv('SNOWFLAKE_PRIVATE_KEY_FILE'),
             account=os.getenv('SNOWFLAKE_ACCOUNT'),
             warehouse=os.getenv('SNOWFLAKE_WAREHOUSE'),
             database=os.getenv('SNOWFLAKE_DATABASE'),
@@ -22,10 +22,16 @@ def upload_raw_data_to_snowflake():
             role=os.getenv('SNOWFLAKE_ROLE')
         )
         cursor = conn.cursor()
-        
+
+        # Create the database, RAW schema, and internal stage on a fresh account.
+        # IF NOT EXISTS makes this safe to re-run.
+        cursor.execute("CREATE DATABASE IF NOT EXISTS PREDICTIVE_MAINTENANCE")
+        cursor.execute("CREATE SCHEMA IF NOT EXISTS PREDICTIVE_MAINTENANCE.RAW")
+        cursor.execute("USE SCHEMA PREDICTIVE_MAINTENANCE.RAW")
+        cursor.execute("CREATE STAGE IF NOT EXISTS cmapss_stage")
+
         # We will upload all the train_FD*.txt files
         # The file:// syntax is required by Snowflake's PUT command for local files
-        # The @cmapss_stage is the internal stage we created in SQL
         
         # Windows paths need to be formatted correctly for the PUT command
         # We replace backslashes with forward slashes for Snowflake's parser
