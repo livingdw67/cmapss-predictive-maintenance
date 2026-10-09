@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives import serialization
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "streamlit_app"))
 from report import SEMANTIC_VIEW, render_report  # noqa: E402
+from modeling import render_modeling  # noqa: E402
 
 REPO_URL = "https://github.com/livingdw67/cmapss-predictive-maintenance"
 TOUR_URL = "https://claude.ai/artifact/Ai1U6EospZRsTgpSU9TxBL#tour"
@@ -215,7 +216,7 @@ st.markdown(
     f"[Source code]({REPO_URL}) · [Guided tour of how it works]({TOUR_URL})"
 )
 
-ask_tab, report_tab, how_tab = st.tabs(["Ask a question", "Fleet report", "How it works"])
+ask_tab, report_tab, model_tab, how_tab = st.tabs(["Ask a question", "Fleet report", "Modeling", "How it works"])
 
 with ask_tab:
     connected = True
@@ -262,6 +263,9 @@ with report_tab:
         render_report(fetch)
     except Exception:
         st.error("The report can't reach Snowflake right now. Please try again later.")
+
+with model_tab:
+    render_modeling()
 
 with how_tab:
     st.markdown(f"""

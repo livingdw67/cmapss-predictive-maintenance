@@ -73,6 +73,7 @@ MTTF splits by fault mode, not by operating conditions, matching the Weibull log
 * **Cortex Analyst eval:** [14_eval_cortex_analyst.py](14_eval_cortex_analyst.py) asks 25 questions 3 times each and scores the returned rows against independent SQL: 75/75 correct. The first pass found a real modeling flaw: a filter value of `'Single (sea level)'` that the model queried as `'Single'`. The fix went into the view. Details in [results.md](results.md).
 * **MCP server:** [15_create_mcp_server.py](15_create_mcp_server.py) creates a Snowflake-managed MCP server (Cortex Analyst on the view, plus SQL execution) and a read-only `FLEET_READER` role for clients. The test asks a question over MCP, runs the returned SQL, and confirms that a write through the SQL tool is refused.
 * **Public demo, "Ask the Fleet":** [public_app/app.py](public_app/app.py) is a Streamlit Community Cloud app where anyone can ask the fleet questions in plain English and get answers from Cortex Analyst, plus the filterable fleet report. [16_setup_public_demo.py](16_setup_public_demo.py) creates what it runs on: a key-only service user, a read-only role, an extra-small warehouse with a 30-second query limit and a monthly credit cap, and a question log that enforces 50 questions a day (10 per visitor). Generated SQL is only run if it is a single read with no AI or system functions.
+* **Modeling tab:** visitors pick XGBoost features and hyperparameters (trees, depth, learning rate) with radio buttons, or a GNN graph type, and see test F2, recall, precision, F2 at every threshold, the tuning landscape and feature importance. [17_build_model_explorer.py](17_build_model_explorer.py) trains all 54 XGBoost settings ahead of time with the same F2 protocol (threshold chosen on validation engines, test engines scored once), checks that the default settings reproduce the published scores, and packages the saved GNN results.
 
 ## Graph Neural Network: Sensors as a Graph
 
@@ -157,6 +158,7 @@ To run the full Snowflake pipeline, set up [key-pair authentication](https://doc
 ├── 14_eval_cortex_analyst.py   # Cortex Analyst eval: 25 questions x 3 runs, scored on answers
 ├── 15_create_mcp_server.py     # Read-only role + Snowflake-managed MCP server, tested end to end
 ├── 16_setup_public_demo.py    # Service user, capped warehouse and question log for the public demo
+├── 17_build_model_explorer.py # Precomputes the public app's Modeling tab (XGBoost grid + GNN results)
 ├── public_app/                 # "Ask the Fleet" app for Streamlit Community Cloud
 ├── streamlit_app/              # Fleet report for Streamlit in Snowflake; report.py is shared with public_app
 ├── docs/images/                # Screenshot of the semantic layer write-up used in this README
