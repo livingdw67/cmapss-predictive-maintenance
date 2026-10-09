@@ -203,7 +203,7 @@ def queue_question(q):
     st.session_state.pending = q
 
 
-st.set_page_config(page_title="Ask the Fleet", page_icon="✈️", layout="wide")
+st.set_page_config(page_title="Ask the Fleet", layout="wide")
 for key, default in [("session_id", str(uuid.uuid4())), ("asked", 0), ("history", []), ("pending", None)]:
     st.session_state.setdefault(key, default)
 
