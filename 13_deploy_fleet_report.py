@@ -7,13 +7,15 @@ load_dotenv()
 
 APP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'streamlit_app')
 APP_FILE = os.path.join(APP_DIR, 'fleet_report.py')
+# Queries and page layout, shared with the public app
+REPORT_FILE = os.path.join(APP_DIR, 'report.py')
 # Pins the Streamlit version so Snowflake runs the version the app was tested on
 ENV_FILE = os.path.join(APP_DIR, 'environment.yml')
 
 def load_app_queries():
-    # Pull QUERIES and SEMANTIC_VIEW out of the app source without importing it
+    # Pull QUERIES and SEMANTIC_VIEW out of report.py without importing it
     # (the app needs a Snowpark session that only exists inside Snowflake).
-    tree = ast.parse(open(APP_FILE, encoding='utf-8').read())
+    tree = ast.parse(open(REPORT_FILE, encoding='utf-8').read())
     found = {}
     for node in tree.body:
         if (isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
@@ -57,7 +59,7 @@ def deploy_fleet_report():
         # ---------------------------------------------------------
         print("Uploading app to stage...")
         cursor.execute("CREATE STAGE IF NOT EXISTS APP_STAGE")
-        for path in (APP_FILE, ENV_FILE):
+        for path in (APP_FILE, REPORT_FILE, ENV_FILE):
             path = path.replace('\\', '/')
             cursor.execute(f"PUT file://{path} @APP_STAGE/fleet_report AUTO_COMPRESS=FALSE OVERWRITE=TRUE")
 

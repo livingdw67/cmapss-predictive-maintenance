@@ -24,3 +24,6 @@ data/
 
 # Snowflake key-pair auth
 *.p8
+
+# Streamlit secrets (Snowflake key for the public demo)
+**/.streamlit/secrets.toml
