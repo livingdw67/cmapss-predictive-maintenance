@@ -21,3 +21,6 @@ data/
 .venv/
 *.pt
 *.log
+
+# Snowflake key-pair auth
+*.p8
