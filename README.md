@@ -47,7 +47,7 @@ The classifiers decide *which engine* to pull. **[09_weibull_reliability_analysi
 
 ## Semantic Layer: Governed Fleet Metrics
 
-**[Take the interactive tour of the Fleet Reliability semantic layer →](https://claude.ai/artifact/Ai1U6EospZRsTgpSU9TxBL)** Model diagram, metric catalog, validation results, Cortex Analyst eval and the MCP server, in one page.
+**[Take the tour of the Fleet Reliability semantic layer →](https://claude.ai/artifact/Ai1U6EospZRsTgpSU9TxBL#tour)** A 10-step guided walk-through of the model, metrics, validation, Cortex Analyst eval and MCP server.
 
 [![Fleet Reliability semantic layer: governed metrics in Snowflake feeding a Streamlit report, Cortex Analyst and an MCP server](docs/images/semantic-layer.png)](https://claude.ai/artifact/Ai1U6EospZRsTgpSU9TxBL)
 
