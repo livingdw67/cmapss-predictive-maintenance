@@ -41,17 +41,39 @@ FORBIDDEN_SQL = re.compile(r"\bCORTEX\b|\bAI_[A-Z_]+\s*\(|\bCOMPLETE\s*\(|\bSYST
 SQL_COMMENTS = re.compile(r"--[^\n]*|/\*.*?\*/", re.DOTALL)
 
 
+class SetupError(Exception):
+    """A configuration problem the app owner can fix; the message never contains secret values."""
+
+
 @st.cache_resource
 def get_connection():
+    # Each step fails with its own message so a misconfigured deploy says what to fix
+    try:
+        has_section = "snowflake" in st.secrets
+    except Exception:  # no secrets configured at all
+        has_section = False
+    if not has_section:
+        raise SetupError("The app's secrets have no [snowflake] section. Paste the secrets file "
+                         "into the app's Settings > Secrets on Streamlit Community Cloud.")
     cfg = st.secrets["snowflake"]
-    key = serialization.load_pem_private_key(cfg["private_key"].encode(), password=None)
+    missing = [k for k in ("account", "user", "role", "warehouse", "private_key") if not cfg.get(k)]
+    if missing:
+        raise SetupError(f"The [snowflake] secrets are missing: {', '.join(missing)}.")
+    try:
+        key = serialization.load_pem_private_key(cfg["private_key"].strip().encode(), password=None)
+    except Exception as e:
+        raise SetupError("The private_key secret could not be read. Paste it whole, including the "
+                         f"BEGIN and END lines, inside triple quotes. ({type(e).__name__})")
     der = key.private_bytes(serialization.Encoding.DER, serialization.PrivateFormat.PKCS8,
                             serialization.NoEncryption())
-    return snowflake.connector.connect(
-        account=cfg["account"], user=cfg["user"], private_key=der,
-        role=cfg["role"], warehouse=cfg["warehouse"],
-        client_session_keep_alive=True,
-    )
+    try:
+        return snowflake.connector.connect(
+            account=cfg["account"], user=cfg["user"], private_key=der,
+            role=cfg["role"], warehouse=cfg["warehouse"],
+            client_session_keep_alive=True, login_timeout=30,
+        )
+    except Exception as e:
+        raise SetupError(f"Snowflake rejected the login: {str(e)[:200]}")
 
 
 def fetch(sql, max_rows=None):
@@ -196,20 +218,24 @@ st.markdown(
 ask_tab, report_tab, how_tab = st.tabs(["Ask a question", "Fleet report", "How it works"])
 
 with ask_tab:
+    connected = True
     try:
         used_today = questions_used_today()
-    except Exception:
-        used_today = DAILY_LIMIT
-        st.error("The demo can't reach Snowflake right now. Please try again later.")
+    except Exception as e:
+        connected, used_today = False, 0
+        st.error("The demo can't reach Snowflake right now, so questions are turned off. Please try again later.")
+        with st.expander("Details for the app owner"):
+            st.write(str(e) if isinstance(e, SetupError) else f"{type(e).__name__}: {str(e)[:200]}")
     left_today = max(0, DAILY_LIMIT - used_today)
     left_session = max(0, SESSION_LIMIT - st.session_state.asked)
-    can_ask = left_today > 0 and left_session > 0
+    can_ask = connected and left_today > 0 and left_session > 0
 
-    st.caption(f"{left_today} of {DAILY_LIMIT} questions left today across all visitors · "
-               f"{left_session} of {SESSION_LIMIT} left for you. Questions are logged to improve the demo.")
-    if not can_ask:
-        st.warning("The question limit has been reached. It resets at midnight Pacific time. "
-                   "The Fleet report tab still works.")
+    if connected:
+        st.caption(f"{left_today} of {DAILY_LIMIT} questions left today across all visitors · "
+                   f"{left_session} of {SESSION_LIMIT} left for you. Questions are logged to improve the demo.")
+        if not can_ask:
+            st.warning("The question limit has been reached. It resets at midnight Pacific time. "
+                       "The Fleet report tab still works.")
 
     st.write("Try one:")
     cols = st.columns(3)
