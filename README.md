@@ -45,6 +45,30 @@ The classifiers decide *which engine* to pull. **[09_weibull_reliability_analysi
 * **Censoring trap:** treating the truncated test engines as ordinary censored data overstates characteristic life by **5–15%**, because each trajectory was cut off at a random fraction of that engine's own life (censoring age correlates 0.56–0.88 with true life). A simulation confirms the mechanism: unbiased under independent censoring, biased when censoring tracks lifetime.
 * **Age vs. sensors:** age alone flags engines within 50 cycles of failure with AUC 0.72–0.86 and misses remaining life by 33–55 cycles on average, which is why sensor-based condition monitoring drives individual removals and Weibull sets the fleet-level window.
 
+## Semantic Layer: Governed Fleet Metrics
+
+**[11_build_semantic_view.py](11_build_semantic_view.py)** adds a `SEMANTIC` schema with a Snowflake semantic view, `FLEET_RELIABILITY`, so BI tools, Cortex Analyst and agents all read the same metric definitions instead of each re-deriving "mean time to failure" in their own SQL.
+
+* **Three grains:** datasets (operating conditions and fault modes from NASA's readme), engines (one row per engine with its failure cycle), and cycles (`MART_ENGINE_LIFESPAN`). Each metric aggregates at its own grain, so engine counts never fan out to telemetry row counts.
+* **Metrics:** engine count, mean/median/min/max time to failure and its spread, cycles flown, share of cycles in the early-warning and critical windows, average sensor readings, and HPC/LPT temperature rise from the first 20 cycles to the critical window.
+* **Business logic from the existing models:** the `health_stage` dimension uses the classifiers' horizons (RUL ≤ 50 early warning, ≤ 15 critical action), so a question asked in plain English uses the same definitions as the deployed models.
+* **Context for natural-language queries:** synonyms (MTTF, T30, failure mode), descriptions with units, and SQL-generation instructions warning that raw sensor levels are not comparable across operating conditions.
+
+| Operating conditions | Fault modes | Engines | MTTF (cycles) | Shortest life | HPC temp rise (°R) |
+|---|---|---|---|---|---|
+| Single | HPC | 100 | 206.3 | 128 | 13.7 |
+| Single | HPC + fan | 100 | 247.2 | 145 | 15.6 |
+| Six | HPC | 260 | 206.8 | 128 | 11.7 |
+| Six | HPC + fan | 249 | 246.0 | 128 | 7.9 |
+
+MTTF splits by fault mode, not by operating conditions, matching the Weibull log-rank results above.
+
+**Checked, reported and served to agents:**
+* **Reconciliation:** [12_validate_metrics.py](12_validate_metrics.py) recomputes every metric with hand-written SQL on STAGING, below anything the view reads. All 80 values (16 metrics × fleet and 4 datasets) match, a deliberate one-cycle threshold error is caught, and a Weibull fit lands within 0.6% of the view's MTTF. Exits non-zero on any mismatch.
+* **Report:** [streamlit_app/fleet_report.py](streamlit_app/fleet_report.py) is a Streamlit in Snowflake app that reads only from the view. [13_deploy_fleet_report.py](13_deploy_fleet_report.py) runs every app query, filtered and unfiltered, before deploying.
+* **Cortex Analyst eval:** [14_eval_cortex_analyst.py](14_eval_cortex_analyst.py) asks 25 questions 3 times each and scores the returned rows against independent SQL: 75/75 correct. The first pass found a real modeling flaw: a filter value of `'Single (sea level)'` that the model queried as `'Single'`. The fix went into the view. Details in [results.md](results.md).
+* **MCP server:** [15_create_mcp_server.py](15_create_mcp_server.py) creates a Snowflake-managed MCP server (Cortex Analyst on the view, plus SQL execution) and a read-only `FLEET_READER` role for clients. The test asks a question over MCP, runs the returned SQL, and confirms that a write through the SQL tool is refused.
+
 ## Graph Neural Network: Sensors as a Graph
 
 **[10_sensor_graph_gnn.py](10_sensor_graph_gnn.py)** treats each engine snapshot as a graph. The 14 informative sensors are nodes, each carrying its last 30 cycles of readings, normalized within its operating condition. A GRU encodes each sensor's history, two GATv2 attention layers pass messages between sensors, and a multitask head predicts RUL plus both maintenance flags. Same engine splits, same validation-tuned F2 thresholds, test engines scored once.
@@ -97,7 +121,7 @@ python 10_sensor_graph_gnn.py # GNN vs. XGBoost ablation (about 2.5 hours on 8 C
 pytest tests                  # Unit tests for windows, graphs and batching
 ```
 
-To run the full Snowflake pipeline, add Snowflake credentials to a `.env` file and run scripts `02` through `07` in order, then the `08` notebook in Snowflake.
+To run the full Snowflake pipeline, set up [key-pair authentication](https://docs.snowflake.com/en/user-guide/key-pair-auth) and add your Snowflake account details (with `SNOWFLAKE_PRIVATE_KEY_FILE` pointing at your private key) to a `.env` file and run scripts `02` through `07` in order, then the `08` notebook in Snowflake. Then build and check the semantic layer with scripts `11` through `15`: `11` builds the view, `12` reconciles every metric against independent SQL (exits non-zero on any mismatch), `13` pre-flights and deploys the Streamlit report, `14` runs the Cortex Analyst eval, and `15` creates the read-only role and MCP server and tests them end to end.
 
 ## Technology Stack
 * **Data Platform:** Snowflake (SQL, Snowpark ML)
@@ -122,6 +146,13 @@ To run the full Snowflake pipeline, add Snowflake credentials to a `.env` file a
 ├── 08_build_register_classifiers.ipynb    # XGBoost tandem classifiers & model registration
 ├── 09_weibull_reliability_analysis.ipynb  # Weibull fleet reliability analysis
 ├── 10_sensor_graph_gnn.py      # Sensor-graph GNN vs. XGBoost ablation
+├── 11_build_semantic_view.py   # Semantic view (FLEET_RELIABILITY) with governed fleet metrics
+├── 12_validate_metrics.py      # Reconciles every semantic-view metric against independent SQL + Weibull
+├── 13_deploy_fleet_report.py   # Pre-flights and deploys the Streamlit in Snowflake report
+├── 14_eval_cortex_analyst.py   # Cortex Analyst eval: 25 questions x 3 runs, scored on answers
+├── 15_create_mcp_server.py     # Read-only role + Snowflake-managed MCP server, tested end to end
+├── streamlit_app/              # Fleet reliability report (reads only from the semantic view)
+├── cortex_analyst_eval.json    # Per-question eval results, generated SQL and latencies
 ├── gnn/                        # Condition-normalized windows, sensor graphs, GATv2 model
 ├── tests/                      # Unit tests for the GNN data and model code
 ├── gnn_results.json            # Per-seed GNN and baseline results
