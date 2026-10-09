@@ -47,6 +47,10 @@ The classifiers decide *which engine* to pull. **[09_weibull_reliability_analysi
 
 ## Semantic Layer: Governed Fleet Metrics
 
+**[View the Fleet Reliability semantic layer write-up →](https://claude.ai/artifact/Ai1U6EospZRsTgpSU9TxBL)** Model diagram, metric catalog, validation results, Cortex Analyst eval and the MCP server, in one page.
+
+[![Fleet Reliability semantic layer: governed metrics in Snowflake feeding a Streamlit report, Cortex Analyst and an MCP server](docs/images/semantic-layer.png)](https://claude.ai/artifact/Ai1U6EospZRsTgpSU9TxBL)
+
 **[11_build_semantic_view.py](11_build_semantic_view.py)** adds a `SEMANTIC` schema with a Snowflake semantic view, `FLEET_RELIABILITY`, so BI tools, Cortex Analyst and agents all read the same metric definitions instead of each re-deriving "mean time to failure" in their own SQL.
 
 * **Three grains:** datasets (operating conditions and fault modes from NASA's readme), engines (one row per engine with its failure cycle), and cycles (`MART_ENGINE_LIFESPAN`). Each metric aggregates at its own grain, so engine counts never fan out to telemetry row counts.
@@ -152,6 +156,7 @@ To run the full Snowflake pipeline, set up [key-pair authentication](https://doc
 ├── 14_eval_cortex_analyst.py   # Cortex Analyst eval: 25 questions x 3 runs, scored on answers
 ├── 15_create_mcp_server.py     # Read-only role + Snowflake-managed MCP server, tested end to end
 ├── streamlit_app/              # Fleet reliability report (reads only from the semantic view)
+├── docs/images/                # Screenshot of the semantic layer write-up used in this README
 ├── cortex_analyst_eval.json    # Per-question eval results, generated SQL and latencies
 ├── gnn/                        # Condition-normalized windows, sensor graphs, GATv2 model
 ├── tests/                      # Unit tests for the GNN data and model code
