@@ -104,6 +104,25 @@ Models are versioned in `PREDICTIVE_MAINTENANCE.ML_MODELS` with computed metrics
 | TURBOFAN_EARLY_WARNING | v1, v1_1, v2_0 | Failure within 50 cycles |
 | TURBOFAN_CRITICAL_ACTION | v1, v1_1, v2_0 | Failure within 15 cycles |
 
+## Semantic Layer Checks
+
+**Metric reconciliation** (`12_validate_metrics.py`): all 16 metrics in the `FLEET_RELIABILITY` semantic view, queried at fleet level and for each of FD001–FD004, match hand-written SQL on STAGING: **80 of 80 values** at a relative tolerance of 1e-6. Changing the reference critical threshold from 15 to 14 cycles produces 5 mismatches, so the check catches a one-cycle error. A two-parameter Weibull fit per fault mode lands within 0.6% of the view's MTTF:
+
+| Fault modes | β | η | Weibull mean | View MTTF |
+|-------------|---|---|--------------|-----------|
+| HPC degradation | 4.39 | 225.5 | 205.5 | 206.6 |
+| HPC and fan degradation | 3.27 | 274.1 | 245.8 | 246.3 |
+
+**Cortex Analyst eval** (`14_eval_cortex_analyst.py`, full per-question output in `cortex_analyst_eval.json`): 25 plain-English questions, each asked 3 times, scored on whether the returned rows contain the answer computed independently from STAGING.
+
+| Run | Answers correct | Note |
+|-----|-----------------|------|
+| First pass (1 run each) | 24 / 25 | Analyst filtered on `'Single'`; the stored value was `'Single (sea level)'`, so the query returned no rows |
+| After fixing the model (1 run each) | 25 / 25 | Dimension values became clean literals, with allowed values listed in each description |
+| Final (3 runs each) | **75 / 75** | Median latency 4.2 s, `claude-sonnet-4-6` |
+
+In an earlier 3-run pass cut short by an API timeout, "Which engine had the longest life" once returned only the cycle count without the engine ID. The question set is small and was written by the builder of the view, so these scores show the layer works as intended; they don't show how it handles questions written by real users.
+
 ## Next Steps
 
 * **Normalize by operating condition and use more sensors:** done in `10_sensor_graph_gnn.py`. With 14 condition-normalized sensors and 30 cycles of history, XGBoost reaches test F2 0.931 (Early Warning) and 0.929 (Critical Action). A graph neural network on the same inputs ties it; see the README.
