@@ -199,7 +199,7 @@ def build_semantic_layer():
                   COMMENT = 'Average LPT outlet temperature in the critical-action window minus the average over the first {BASELINE_CYCLES} cycles, degrees Rankine. Only meaningful within a single operating condition.'
               )
               COMMENT = 'Reliability and degradation metrics for the NASA CMAPSS turbofan fleet (709 engines, all run to failure).'
-              AI_SQL_GENERATION 'All engines in this data were run until failure, so lifespan metrics describe completed lives, not a live fleet. Raw sensor averages differ by operating condition: when comparing sensor values or temperature rise across datasets, group by operating_conditions or warn that Six-condition fleets are not directly comparable to Single-condition fleets. Report temperatures in degrees Rankine.'
+              AI_SQL_GENERATION 'All engines in this data were run until failure, so lifespan metrics describe completed lives, not a live fleet. Raw sensor averages differ by operating condition: when comparing sensor values or temperature rise across datasets, group by operating_conditions or warn that Six-condition fleets are not directly comparable to Single-condition fleets. Report temperatures in degrees Rankine. When the user asks for a difference or ratio, compute it in the final SELECT.'
         """)
 
         # ---------------------------------------------------------
