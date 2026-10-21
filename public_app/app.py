@@ -1,27 +1,32 @@
-# Ask the Fleet: public demo of the FLEET_RELIABILITY semantic layer.
-# Hosted on Streamlit Community Cloud. Visitors ask questions in plain English;
-# Cortex Analyst turns them into SQL against the semantic view, and the app runs
-# that SQL as a read-only service user on a small, capped warehouse.
+# Ask the Fleet: public demo of the fleet reliability semantic layer, served from Databricks.
+# Hosted on Streamlit Community Cloud. Visitors ask questions in plain English; a Databricks
+# Genie space turns them into SQL against Unity Catalog metric views and runs it as a read-only
+# service principal on the workspace's serverless SQL warehouse.
+import json
 import os
-import re
 import sys
 import time
 import uuid
+from datetime import timedelta
 
 import altair as alt
 import pandas as pd
-import requests
-import snowflake.connector
 import streamlit as st
-from cryptography.hazmat.primitives import serialization
+from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.dashboards import MessageStatus
+from databricks.sdk.service.sql import StatementParameterListItem, StatementState
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "streamlit_app"))
-from report import SEMANTIC_VIEW, render_report  # noqa: E402
+from report import METRIC_VIEWS, render_report  # noqa: E402
 from modeling import render_modeling  # noqa: E402
 
 REPO_URL = "https://github.com/livingdw67/cmapss-predictive-maintenance"
 TOUR_URL = "https://claude.ai/artifact/Ai1U6EospZRsTgpSU9TxBL#tour"
-# Each question costs about 0.067 Snowflake credits, paid by the project owner
+QUESTION_LOG = "workspace.cmapss.demo_question_log"
+# The Fleet report is served from a snapshot of the metric views (databricks/export_report_snapshot.py),
+# so it keeps working when the Free Edition compute quota runs out; only questions use live compute
+SNAPSHOT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "report_snapshot.json")
+# Databricks Free Edition has a daily compute quota shared with the pipeline, so questions are capped
 DAILY_LIMIT = 50
 SESSION_LIMIT = 10
 MAX_QUESTION_CHARS = 300
@@ -34,12 +39,7 @@ SUGGESTIONS = [
     "How much does HPC outlet temperature rise before failure in FD001?",
     "What share of cycles were flown within 15 cycles of failure?",
 ]
-# Generated SQL must be a single read and must not call any AI or system function.
-# The service role can only read the semantic layer's tables; this check also keeps
-# a crafted question from spending credits on Cortex functions, which the account
-# grants to PUBLIC.
-FORBIDDEN_SQL = re.compile(r"\bCORTEX\b|\bAI_[A-Z_]+\s*\(|\bCOMPLETE\s*\(|\bSYSTEM\$|;\s*\S", re.IGNORECASE)
-SQL_COMMENTS = re.compile(r"--[^\n]*|/\*.*?\*/", re.DOTALL)
+NUMERIC_TYPES = {"BYTE", "SHORT", "INT", "LONG", "FLOAT", "DOUBLE", "DECIMAL"}
 
 
 class SetupError(Exception):
@@ -47,83 +47,96 @@ class SetupError(Exception):
 
 
 @st.cache_resource
-def get_connection():
+def get_client():
     # Each step fails with its own message so a misconfigured deploy says what to fix
     try:
-        has_section = "snowflake" in st.secrets
+        has_section = "databricks" in st.secrets
     except Exception:  # no secrets configured at all
         has_section = False
     if not has_section:
-        raise SetupError("The app's secrets have no [snowflake] section. Paste the secrets file "
+        raise SetupError("The app's secrets have no [databricks] section. Paste the secrets file "
                          "into the app's Settings > Secrets on Streamlit Community Cloud.")
-    cfg = st.secrets["snowflake"]
-    missing = [k for k in ("account", "user", "role", "warehouse", "private_key") if not cfg.get(k)]
+    cfg = st.secrets["databricks"]
+    missing = [k for k in ("host", "client_id", "client_secret", "warehouse_id", "genie_space_id") if not cfg.get(k)]
     if missing:
-        raise SetupError(f"The [snowflake] secrets are missing: {', '.join(missing)}.")
+        raise SetupError(f"The [databricks] secrets are missing: {', '.join(missing)}.")
     try:
-        key = serialization.load_pem_private_key(cfg["private_key"].strip().encode(), password=None)
+        client = WorkspaceClient(host=cfg["host"], client_id=cfg["client_id"], client_secret=cfg["client_secret"])
+        client.current_user.me()
+        return client
     except Exception as e:
-        raise SetupError("The private_key secret could not be read. Paste it whole, including the "
-                         f"BEGIN and END lines, inside triple quotes. ({type(e).__name__})")
-    der = key.private_bytes(serialization.Encoding.DER, serialization.PrivateFormat.PKCS8,
-                            serialization.NoEncryption())
-    try:
-        return snowflake.connector.connect(
-            account=cfg["account"], user=cfg["user"], private_key=der,
-            role=cfg["role"], warehouse=cfg["warehouse"],
-            client_session_keep_alive=True, login_timeout=30,
-        )
-    except Exception as e:
-        raise SetupError(f"Snowflake rejected the login: {str(e)[:200]}")
+        raise SetupError(f"Databricks rejected the service principal login: {str(e)[:200]}")
+
+
+def settings():
+    return st.secrets["databricks"]
+
+
+def to_df(response):
+    """Statement Execution API response -> DataFrame, with numeric columns typed."""
+    if response.status and response.status.state != StatementState.SUCCEEDED:
+        error = response.status.error.message if response.status.error else response.status.state.value
+        raise RuntimeError(error[:300])
+    columns = response.manifest.schema.columns
+    rows = response.result.data_array if response.result and response.result.data_array else []
+    df = pd.DataFrame(rows, columns=[c.name for c in columns])
+    for c in columns:
+        if c.type_name and c.type_name.value in NUMERIC_TYPES:
+            df[c.name] = pd.to_numeric(df[c.name])
+    return df
+
+
+def execute(sql, parameters=None, max_rows=None):
+    client = get_client()
+    response = client.statement_execution.execute_statement(
+        statement=sql, warehouse_id=settings()["warehouse_id"], parameters=parameters,
+        row_limit=max_rows, wait_timeout="50s",
+    )
+    # A cold warehouse can take longer than the 50-second synchronous wait
+    while response.status.state in (StatementState.PENDING, StatementState.RUNNING):
+        time.sleep(1)
+        response = client.statement_execution.get_statement(response.statement_id)
+    return response
 
 
 def fetch(sql, max_rows=None):
-    cur = get_connection().cursor()
-    cur.execute(sql)
-    rows = cur.fetchmany(max_rows) if max_rows else cur.fetchall()
-    return pd.DataFrame(rows, columns=[c[0] for c in cur.description])
+    return to_df(execute(sql, max_rows=max_rows))
+
+
+@st.cache_resource
+def load_snapshot():
+    with open(SNAPSHOT_FILE, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def fetch_snapshot(sql):
+    """The report's queries, answered from the metric-view results saved by export_report_snapshot.py."""
+    result = load_snapshot()["queries"][sql]
+    return pd.DataFrame(result["rows"], columns=result["columns"])
 
 
 def questions_used_today():
-    return int(fetch("SELECT COUNT(*) FROM PREDICTIVE_MAINTENANCE.DEMO.QUESTION_LOG "
-                     "WHERE asked_at >= CURRENT_DATE()").iloc[0, 0])
+    return int(fetch(f"SELECT COUNT(*) FROM {QUESTION_LOG} WHERE asked_at >= current_date()").iloc[0, 0])
 
 
 def log_question(question, status, sql, row_count, latency_ms):
-    get_connection().cursor().execute(
-        "INSERT INTO PREDICTIVE_MAINTENANCE.DEMO.QUESTION_LOG "
-        "(session_id, question, status, generated_sql, row_count, latency_ms) VALUES (%s, %s, %s, %s, %s, %s)",
-        (st.session_state.session_id, question, status, sql, row_count, latency_ms),
-    )
+    params = [
+        StatementParameterListItem(name="session_id", value=st.session_state.session_id),
+        StatementParameterListItem(name="question", value=question),
+        StatementParameterListItem(name="status", value=status),
+        StatementParameterListItem(name="generated_sql", value=sql),
+        StatementParameterListItem(name="row_count", value=None if row_count is None else str(row_count), type="INT"),
+        StatementParameterListItem(name="latency_ms", value=str(latency_ms), type="INT"),
+    ]
+    execute(f"INSERT INTO {QUESTION_LOG} (asked_at, session_id, question, status, generated_sql, row_count, latency_ms) "
+            "VALUES (current_timestamp(), :session_id, :question, :status, :generated_sql, :row_count, :latency_ms)",
+            parameters=params)
 
 
-def ask_analyst(question):
-    """Send one question to Cortex Analyst; reconnect once if the session token expired."""
-    for attempt in range(2):
-        conn = get_connection()
-        resp = requests.post(
-            f"https://{conn.host}/api/v2/cortex/analyst/message",
-            headers={"Authorization": f'Snowflake Token="{conn.rest.token}"',
-                     "Content-Type": "application/json", "Accept": "application/json"},
-            json={"messages": [{"role": "user", "content": [{"type": "text", "text": question}]}],
-                  "semantic_view": SEMANTIC_VIEW},
-            timeout=90,
-        )
-        if resp.status_code == 401 and attempt == 0:
-            get_connection.clear()
-            continue
-        resp.raise_for_status()
-        return resp.json()["message"]["content"]
-
-
-def clean_sql(sql):
-    """Strip comments (Cortex Analyst appends one) and any trailing semicolon."""
-    return SQL_COMMENTS.sub("", sql).strip().rstrip(";").strip()
-
-
-def safe_to_run(sql):
-    sql = clean_sql(sql)
-    return sql.upper().startswith(("SELECT", "WITH")) and not FORBIDDEN_SQL.search(sql)
+def ask_genie(question):
+    """Send one question to the Genie space and wait for its answer."""
+    return get_client().genie.start_conversation_and_wait(
+        settings()["genie_space_id"], question, timeout=timedelta(seconds=120))
 
 
 def auto_chart(df):
@@ -148,31 +161,36 @@ def answer(question):
     start = time.time()
     status, sql, row_count = "error", None, None
     try:
-        content = ask_analyst(question)
-        record["text"] = " ".join(c["text"] for c in content if c["type"] == "text")
-        record["suggestions"] = next((c["suggestions"] for c in content if c["type"] == "suggestions"), [])
-        sql = next((c["statement"] for c in content if c["type"] == "sql"), None)
+        message = ask_genie(question)
+        if message.status != MessageStatus.COMPLETED:
+            raise RuntimeError(message.error.error if message.error else message.status.value)
+        texts = []
+        for a in message.attachments or []:
+            if a.text and a.text.content:
+                texts.append(a.text.content)
+            if a.suggested_questions and a.suggested_questions.questions:
+                record["suggestions"] = a.suggested_questions.questions
+            if a.query and a.query.query and sql is None:
+                sql = a.query.query
+                if a.query.description:
+                    texts.append(a.query.description)
+                # Genie already ran the query as the read-only service principal; fetch its result
+                result = get_client().genie.get_message_attachment_query_result(
+                    settings()["genie_space_id"], message.conversation_id, message.message_id, a.attachment_id)
+                df = to_df(result.statement_response).head(MAX_ROWS)
+                record["sql"], record["df"] = sql, df
+                status, row_count = "ok", len(df)
+        record["text"] = "\n\n".join(texts)
         if sql is None:
             status = "no_sql"
-        elif not safe_to_run(sql):
-            status, record["error"] = "blocked", "This query was not run: the demo only runs read-only queries on the fleet data."
-        else:
-            sql = clean_sql(sql)
-            record["sql"] = sql
-            numeric = {}
-            df = fetch(sql, MAX_ROWS)
-            for col in df.columns:
-                converted = pd.to_numeric(df[col], errors="coerce")
-                if converted.notna().all() and len(df):
-                    numeric[col] = converted
-            df = df.assign(**numeric)
-            record["df"] = df
-            status, row_count = "ok", len(df)
     except Exception as e:
         record["error"] = "Something went wrong answering that question. Try rephrasing it."
         record["detail"] = str(e)[:300]
     finally:
-        log_question(question, status, sql, row_count, int((time.time() - start) * 1000))
+        try:
+            log_question(question, status, sql, row_count, int((time.time() - start) * 1000))
+        except Exception:
+            pass  # a failed log write should not hide the answer
         st.session_state.asked += 1
     return record
 
@@ -194,7 +212,7 @@ def show_record(r):
                     st.altair_chart(chart, width="stretch")
                 st.dataframe(r["df"], hide_index=True, width="stretch")
         if r["sql"]:
-            with st.expander("SQL generated by Cortex Analyst"):
+            with st.expander("SQL generated by Genie"):
                 st.code(r["sql"], language="sql")
         for s in r["suggestions"]:
             st.button(s, key=f"sugg-{uuid.uuid4()}", on_click=queue_question, args=(s,))
@@ -211,8 +229,8 @@ for key, default in [("session_id", str(uuid.uuid4())), ("asked", 0), ("history"
 st.title("Ask the Fleet")
 st.markdown(
     "Ask questions about 709 NASA turbofan engines that were run until they failed. "
-    "Your question goes to **Snowflake Cortex Analyst**, which writes SQL against a governed "
-    "**semantic view** of reliability metrics; the answer comes straight from Snowflake. "
+    "Your question goes to a **Databricks Genie** space, which writes SQL against governed "
+    "**Unity Catalog metric views** of reliability metrics; the answer comes straight from Databricks. "
     f"[Source code]({REPO_URL}) · [Guided tour of how it works]({TOUR_URL})"
 )
 
@@ -224,7 +242,7 @@ with ask_tab:
         used_today = questions_used_today()
     except Exception as e:
         connected, used_today = False, 0
-        st.error("The demo can't reach Snowflake right now, so questions are turned off. Please try again later.")
+        st.error("The demo can't reach Databricks right now, so questions are turned off. Please try again later.")
         with st.expander("Details for the app owner"):
             st.write(str(e) if isinstance(e, SetupError) else f"{type(e).__name__}: {str(e)[:200]}")
     left_today = max(0, DAILY_LIMIT - used_today)
@@ -235,7 +253,7 @@ with ask_tab:
         st.caption(f"{left_today} of {DAILY_LIMIT} questions left today across all visitors · "
                    f"{left_session} of {SESSION_LIMIT} left for you. Questions are logged to improve the demo.")
         if not can_ask:
-            st.warning("The question limit has been reached. It resets at midnight Pacific time. "
+            st.warning("The question limit has been reached. It resets at midnight UTC. "
                        "The Fleet report tab still works.")
 
     st.write("Try one:")
@@ -252,33 +270,38 @@ with ask_tab:
     question = typed or st.session_state.pending
     st.session_state.pending = None
     if question and can_ask:
-        with st.spinner("Asking Cortex Analyst..."):
+        with st.spinner("Asking Genie..."):
             record = answer(question.strip()[:MAX_QUESTION_CHARS])
         st.session_state.history.append(record)
         st.rerun()
 
 with report_tab:
-    st.caption(f"Every number comes from the semantic view `{SEMANTIC_VIEW}`. Filters cost a fraction of a cent.")
     try:
-        render_report(fetch)
-    except Exception:
-        st.error("The report can't reach Snowflake right now. Please try again later.")
+        st.caption(f"Every number comes from the metric views {METRIC_VIEWS}, saved "
+                   f"{load_snapshot()['exported_at'][:10]}. The NASA data is fixed, so the snapshot does not go stale.")
+        render_report(fetch_snapshot, backend="databricks")
+    except Exception as e:
+        st.error("The report could not be loaded.")
+        with st.expander("Details for the app owner"):
+            st.write(f"{type(e).__name__}: {str(e)[:200]}")
 
 with model_tab:
     render_modeling()
 
 with how_tab:
     st.markdown(f"""
-**The semantic view is the only place metrics are defined.** `FLEET_RELIABILITY` models three tables at three
-grains (sub-fleets, engines, cycles) with 16 metrics such as mean time to failure, plus synonyms and
-instructions that help Cortex Analyst map a question to the right definition.
+**Metrics are defined once, in Unity Catalog metric views.** `fleet_engines` (one row per engine) and
+`fleet_cycles` (one row per engine per cycle) hold the reliability metrics, such as mean time to failure,
+with comments and synonyms that help Genie map a question to the right definition. Keeping the two grains
+apart means engine counts never fan out to cycle rows.
 
-**It is checked two ways.** Every metric is recomputed with separate SQL on the raw staging data (80 of 80
-values match), and an evaluation asks 25 questions three times each and scores the returned answers (75 of 75).
+**They are checked on every pipeline run.** The Databricks Job that builds them recomputes each key metric
+with plain SQL on the tables and fails if any value differs.
 
-**This app is locked down.** It connects as a service user that can only log in with a key, runs as a
-read-only role on its own extra-small warehouse with a 30-second query limit and a monthly credit cap, and
-only runs SQL that reads the semantic view. Questions are capped at {DAILY_LIMIT} a day.
+**This app is locked down.** It signs in as a Databricks service principal that can only read the metric
+views and write to the question log. Genie runs its SQL under that identity, so a question can't change
+data. Questions are capped at {DAILY_LIMIT} a day.
 
-[Source code and full write-up]({REPO_URL})
+The same pipeline was first built on Snowflake (semantic view and Cortex Analyst); both versions are in
+the repo. [Source code and full write-up]({REPO_URL})
 """)

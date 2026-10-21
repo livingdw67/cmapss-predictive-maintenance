@@ -20,6 +20,10 @@ resources:
           depends_on: [{ task_key: ingest }]
           notebook_task:
             notebook_path: ../src/02_transform.py
+        - task_key: semantic_layer
+          depends_on: [{ task_key: transform }]
+          notebook_task:
+            notebook_path: ../src/05_semantic_layer.py
         - task_key: train
           depends_on: [{ task_key: transform }]
           notebook_task:
