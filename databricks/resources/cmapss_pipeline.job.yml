@@ -1,0 +1,30 @@
+resources:
+  jobs:
+    cmapss_pipeline:
+      name: cmapss-pipeline
+      # Weekly retrain and rescore; paused so it only runs when triggered
+      schedule:
+        quartz_cron_expression: "0 0 6 ? * MON"
+        timezone_id: America/New_York
+        pause_status: PAUSED
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+      tasks:
+        - task_key: ingest
+          notebook_task:
+            notebook_path: ../src/01_ingest.py
+        - task_key: transform
+          depends_on: [{ task_key: ingest }]
+          notebook_task:
+            notebook_path: ../src/02_transform.py
+        - task_key: train
+          depends_on: [{ task_key: transform }]
+          notebook_task:
+            notebook_path: ../src/03_train_register.py
+        - task_key: score
+          depends_on: [{ task_key: train }]
+          notebook_task:
+            notebook_path: ../src/04_batch_score.py

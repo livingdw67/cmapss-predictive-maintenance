@@ -118,6 +118,35 @@ MTTF splits by fault mode, not by operating conditions, matching the Weibull log
 
 [Raw results for every seed](gnn_results.json), including recall, precision, PR-AUC, thresholds and the NASA asymmetric score.
 
+## Databricks Port: Delta, MLflow and Unity Catalog
+
+The same pipeline also runs on Databricks (serverless) as one Asset Bundle in [`databricks/`](databricks/). A four-task Job does the following:
+
+1. **Ingest:** downloads the NASA archive into a Unity Catalog volume and loads the train and test files into bronze Delta tables.
+2. **Transform:** rebuilds staging, core, marts and the feature store as Delta tables with Spark SQL window functions. The feature table has a `(engine_id, cycle TIMESERIES)` primary key, so it is a Unity Catalog feature table.
+3. **Train and register:** for each classifier, compares class weighting, SMOTE and 6x undersampling as nested MLflow runs. The best validation F2 is registered in Unity Catalog with a `champion` alias. Each registered model is a pyfunc that carries its own validation-tuned threshold.
+4. **Batch score:** loads both `@champion` models, scores the latest cycle of all 707 NASA test engines (histories cut off before failure) and writes `engine_risk_scores` with the tandem decision. NASA's true RUL for those engines is joined in for checking.
+
+Engine-level check on the NASA test engines, which played no part in training or model selection:
+
+| Model | Recall | Precision |
+|---|---|---|
+| Early Warning (RUL ≤ 50) | 0.952 | 0.720 |
+| Critical Action (RUL ≤ 15) | 0.912 | 0.689 |
+
+| Action | Engines | Avg. true RUL | Truly ≤ 50 | Truly ≤ 15 |
+|---|---|---|---|---|
+| Immediate action required | 135 | 16.6 | 129 | 93 |
+| Schedule maintenance | 169 | 54.4 | 90 | 9 |
+| Normal operations | 403 | 114.5 | 11 | 0 |
+
+```bash
+cd databricks
+databricks auth login --host <workspace-url>
+databricks bundle deploy
+databricks bundle run cmapss_pipeline
+```
+
 ## Run It
 
 ```bash
@@ -132,7 +161,7 @@ pytest tests                  # Unit tests for windows, graphs and batching
 To run the full Snowflake pipeline, set up [key-pair authentication](https://docs.snowflake.com/en/user-guide/key-pair-auth) and add your Snowflake account details (with `SNOWFLAKE_PRIVATE_KEY_FILE` pointing at your private key) to a `.env` file and run scripts `02` through `07` in order, then the `08` notebook in Snowflake. Then build and check the semantic layer with scripts `11` through `15`: `11` builds the view, `12` reconciles every metric against independent SQL (exits non-zero on any mismatch), `13` pre-flights and deploys the Streamlit report, `14` runs the Cortex Analyst eval, and `15` creates the read-only role and MCP server and tests them end to end.
 
 ## Technology Stack
-* **Data Platform:** Snowflake (SQL, Snowpark ML)
+* **Data Platform:** Snowflake (SQL, Snowpark ML); Databricks (Delta Lake, Unity Catalog, MLflow, Jobs, Asset Bundles)
 * **Orchestration & Extraction:** Python, `snowflake-connector-python`
 * **Data Science & ML:** `xgboost`, `pandas`, `scikit-learn`, `matplotlib`
 * **Deep Learning:** PyTorch, PyTorch Geometric (GATv2), GRU sequence encoders
@@ -144,6 +173,7 @@ To run the full Snowflake pipeline, set up [key-pair authentication](https://doc
 ├── .env                        # Local Snowflake credentials (git-ignored)
 ├── .gitignore                  # Security and environment exclusions
 ├── README.md                   # Project documentation
+├── databricks/                 # Databricks Asset Bundle: ingest, transform, MLflow training, batch scoring
 ├── 01_fetch_data.py            # Retrieves the raw NASA CMAPSS dataset
 ├── 02_upload_to_snowflake.py   # Securely PUTs local data to internal Snowflake stage
 ├── 03_load_raw_table.py        # Executes COPY INTO commands for the RAW layer
