@@ -27,3 +27,6 @@ data/
 
 # Streamlit secrets (Snowflake key for the public demo)
 **/.streamlit/secrets.toml
+
+# Databricks bundle local state
+.databricks/

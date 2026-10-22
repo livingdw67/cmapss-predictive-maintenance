@@ -45,39 +45,89 @@ QUERIES = {
             {where})
     """,
 }
+# The same report on Databricks: the semantic view becomes two Unity Catalog metric views, one per
+# grain (databricks/src/05_semantic_layer.py), so engine and cycle metrics are queried separately
+# and joined on the dataset. {where} filters on metric-view dimensions.
+METRIC_VIEWS = "workspace.cmapss.fleet_engines and workspace.cmapss.fleet_cycles"
+DATABRICKS_QUERIES = {
+    "filters": """
+        SELECT dataset_id, operating_conditions, fault_modes, MEASURE(engine_count) AS engine_count
+        FROM workspace.cmapss.fleet_engines
+        GROUP BY ALL ORDER BY dataset_id
+    """,
+    "kpis": """
+        WITH e AS (
+            SELECT MEASURE(engine_count) AS engine_count, MEASURE(mean_time_to_failure) AS mean_time_to_failure,
+                   MEASURE(median_time_to_failure) AS median_time_to_failure, MEASURE(shortest_life) AS shortest_life
+            FROM workspace.cmapss.fleet_engines {where}),
+        c AS (
+            SELECT MEASURE(critical_action_cycle_share) AS critical_action_cycle_share
+            FROM workspace.cmapss.fleet_cycles {where})
+        SELECT * FROM e CROSS JOIN c
+    """,
+    "by_dataset": """
+        WITH e AS (
+            SELECT dataset_id, operating_conditions, fault_modes,
+                   MEASURE(engine_count) AS engine_count, MEASURE(mean_time_to_failure) AS mean_time_to_failure,
+                   MEASURE(median_time_to_failure) AS median_time_to_failure, MEASURE(shortest_life) AS shortest_life,
+                   MEASURE(longest_life) AS longest_life, MEASURE(life_stddev) AS life_stddev
+            FROM workspace.cmapss.fleet_engines {where} GROUP BY ALL),
+        c AS (
+            SELECT dataset_id, MEASURE(hpc_temp_rise_to_failure) AS hpc_temp_rise_to_failure,
+                   MEASURE(lpt_temp_rise_to_failure) AS lpt_temp_rise_to_failure
+            FROM workspace.cmapss.fleet_cycles {where} GROUP BY ALL)
+        SELECT * FROM e JOIN c USING (dataset_id) ORDER BY dataset_id
+    """,
+    "engine_lives": """
+        SELECT engine_id, fault_modes, MEASURE(mean_time_to_failure) AS mean_time_to_failure
+        FROM workspace.cmapss.fleet_engines {where} GROUP BY ALL
+    """,
+    "by_stage": """
+        SELECT health_stage, MEASURE(total_cycles) AS total_cycles,
+               MEASURE(avg_hpc_outlet_temp) AS avg_hpc_outlet_temp, MEASURE(avg_lpt_outlet_temp) AS avg_lpt_outlet_temp
+        FROM workspace.cmapss.fleet_cycles {where} GROUP BY ALL
+    """,
+}
 STAGE_ORDER = ["Healthy", "Early warning", "Critical action"]
 FAULT_COLORS = alt.Scale(domain=["HPC degradation", "HPC and fan degradation"], range=["#2a78d6", "#eb6834"])
 
 
 def sql_list(values):
-    return ", ".join("'" + v.replace("'", "''") + "'" for v in values)
+    # Sorted so the same selection always produces the same SQL (the public app's snapshot is keyed on it)
+    return ", ".join("'" + v.replace("'", "''") + "'" for v in sorted(values))
 
 
-def where_clause(conditions, faults):
+def where_clause(conditions, faults, prefix="datasets."):
     parts = []
     if conditions:
-        parts.append(f"datasets.operating_conditions IN ({sql_list(conditions)})")
+        parts.append(f"{prefix}operating_conditions IN ({sql_list(conditions)})")
     if faults:
-        parts.append(f"datasets.fault_modes IN ({sql_list(faults)})")
+        parts.append(f"{prefix}fault_modes IN ({sql_list(faults)})")
     return ("WHERE " + " AND ".join(parts)) if parts else ""
 
 
+def query_text(backend, name, where=""):
+    if backend == "databricks":
+        return DATABRICKS_QUERIES[name].format(where=where)
+    return QUERIES[name].format(sv=SEMANTIC_VIEW, where=where)
+
+
 @st.cache_data(ttl=600)
-def run(_fetch, name, where=""):
+def run(_fetch, name, where="", backend="snowflake"):
     # _fetch(sql) -> DataFrame; the leading underscore keeps it out of the cache key
-    df = _fetch(QUERIES[name].format(sv=SEMANTIC_VIEW, where=where))
+    df = _fetch(query_text(backend, name, where))
     df.columns = [c.lower() for c in df.columns]
     return df
 
 
-def render_report(fetch):
-    options = run(fetch, "filters")
+def render_report(fetch, backend="snowflake"):
+    options = run(fetch, "filters", backend=backend)
     c1, c2 = st.columns(2)
     conditions = c1.multiselect("Operating conditions", sorted(options["operating_conditions"].unique()))
     faults = c2.multiselect("Fault modes", sorted(options["fault_modes"].unique()))
-    where = where_clause(conditions, faults)
+    where = where_clause(conditions, faults, prefix="" if backend == "databricks" else "datasets.")
 
-    k = run(fetch, "kpis", where).iloc[0]
+    k = run(fetch, "kpis", where, backend).iloc[0]
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Engines", f"{int(k['engine_count']):,}")
     m2.metric("MTTF (cycles)", f"{float(k['mean_time_to_failure']):.1f}")
@@ -88,7 +138,7 @@ def render_report(fetch):
     left, right = st.columns(2)
     with left:
         st.subheader("Lifespan distribution")
-        lives = run(fetch, "engine_lives", where).rename(columns={"mean_time_to_failure": "cycles_to_failure"})
+        lives = run(fetch, "engine_lives", where, backend).rename(columns={"mean_time_to_failure": "cycles_to_failure"})
         lives["cycles_to_failure"] = lives["cycles_to_failure"].astype(float)
         st.altair_chart(
             alt.Chart(lives).mark_bar(opacity=0.85).encode(
@@ -101,7 +151,7 @@ def render_report(fetch):
         )
     with right:
         st.subheader("Temperatures by health stage")
-        stage = run(fetch, "by_stage", where)
+        stage = run(fetch, "by_stage", where, backend)
         stage["health_stage"] = pd.Categorical(stage["health_stage"], STAGE_ORDER, ordered=True)
         stage = stage.sort_values("health_stage")
         st.dataframe(
@@ -117,7 +167,7 @@ def render_report(fetch):
                        "condition to compare temperatures across stages.")
 
     st.subheader("By sub-fleet")
-    by_ds = run(fetch, "by_dataset", where)
+    by_ds = run(fetch, "by_dataset", where, backend)
     st.dataframe(
         by_ds.rename(columns={
             "dataset_id": "Dataset", "operating_conditions": "Conditions", "fault_modes": "Fault modes",
@@ -131,4 +181,4 @@ def render_report(fetch):
 
     with st.expander("Queries behind this page"):
         for name in ["kpis", "by_dataset", "engine_lives", "by_stage"]:
-            st.code(QUERIES[name].format(sv=SEMANTIC_VIEW, where=where).strip(), language="sql")
+            st.code(query_text(backend, name, where).strip(), language="sql")

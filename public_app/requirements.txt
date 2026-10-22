@@ -1,6 +1,4 @@
 streamlit==1.52.2
-snowflake-connector-python
+databricks-sdk==0.155.0
 pandas
 altair
-requests
-cryptography
