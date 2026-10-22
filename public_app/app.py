@@ -148,7 +148,7 @@ def auto_chart(df):
         return None
     value = numeric[0]
     label = next(c for c in df.columns if c != value)
-    return alt.Chart(df).mark_bar(color="#2a78d6", cornerRadiusEnd=3).encode(
+    return alt.Chart(df).mark_bar(color="#5fc4c0", cornerRadiusEnd=3).encode(
         x=alt.X(f"{value}:Q", title=value.replace("_", " ").lower()),
         y=alt.Y(f"{label}:N", sort="-x", title=None),
         tooltip=[label, alt.Tooltip(f"{value}:Q", format=",.2f")],
@@ -196,9 +196,9 @@ def answer(question):
 
 
 def show_record(r):
-    with st.chat_message("user"):
-        st.write(r["question"])
-    with st.chat_message("assistant"):
+    # One bordered card per question: the question as the card's heading, Genie's answer below it
+    with st.container(border=True):
+        st.markdown(f"**{r['question']}**")
         if r["text"]:
             st.write(r["text"])
         if r["error"]:
@@ -222,11 +222,16 @@ def queue_question(q):
     st.session_state.pending = q
 
 
-st.set_page_config(page_title="Ask the Fleet", layout="wide")
+# Theme comes from .streamlit/config.toml at the repo root (Daniel Livingston brand: navy, teal, one amber highlight)
+st.set_page_config(page_title="Ask the Fleet", page_icon=os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                   "assets", "favicon.png"), layout="wide")
 for key, default in [("session_id", str(uuid.uuid4())), ("asked", 0), ("history", []), ("pending", None)]:
     st.session_state.setdefault(key, default)
 
 st.title("Ask the Fleet")
+# The brand's short amber rule under the headline
+st.markdown('<div style="width:56px;height:4px;background:#f0a742;border-radius:2px;margin:-0.5rem 0 1rem"></div>',
+            unsafe_allow_html=True)
 st.markdown(
     "Ask questions about 709 NASA turbofan engines that were run until they failed. "
     "Your question goes to a **Databricks Genie** space, which writes SQL against governed "
