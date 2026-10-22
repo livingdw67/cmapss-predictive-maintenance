@@ -51,7 +51,7 @@ The classifiers decide *which engine* to pull. **[09_weibull_reliability_analysi
 
 **[Take the tour of the Fleet Reliability semantic layer →](https://claude.ai/artifact/Ai1U6EospZRsTgpSU9TxBL#tour)** A 10-step guided walk-through of the model, metrics, validation, Cortex Analyst eval and MCP server.
 
-[![Fleet Reliability semantic layer: governed metrics in Snowflake feeding a Streamlit report, Cortex Analyst and an MCP server](docs/images/semantic-layer.png)](https://claude.ai/artifact/Ai1U6EospZRsTgpSU9TxBL)
+[![Fleet Reliability semantic layer: governed metrics in Snowflake feeding a Streamlit report, Cortex Analyst and an MCP server, and the Databricks port with Unity Catalog metric views and Genie](docs/images/semantic-layer.png)](https://claude.ai/artifact/Ai1U6EospZRsTgpSU9TxBL)
 
 **[11_build_semantic_view.py](11_build_semantic_view.py)** adds a `SEMANTIC` schema with a Snowflake semantic view, `FLEET_RELIABILITY`, so BI tools, Cortex Analyst and agents all read the same metric definitions instead of each re-deriving "mean time to failure" in their own SQL.
 
