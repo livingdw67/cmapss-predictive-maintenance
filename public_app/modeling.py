@@ -76,7 +76,7 @@ def render_xgboost(data):
             for t in TARGET_LABELS for c in cfg["targets"][t]["curve"]]
     chosen = pd.DataFrame([{"Threshold": cfg["targets"][t]["threshold"], "Target": TARGET_LABELS[t].split(" (")[0]}
                            for t in TARGET_LABELS])
-    color = alt.Color("Target:N", scale=alt.Scale(domain=["Early warning", "Critical action"], range=["#2a78d6", "#eb6834"]),
+    color = alt.Color("Target:N", scale=alt.Scale(domain=["Early warning", "Critical action"], range=["#5fc4c0", "#f0a742"]),
                       legend=alt.Legend(orient="bottom", title=None))
     # Zoom to the range the curves cover; on a 0-1 axis they look flat
     low = max(0.0, min(r["F2"] for r in rows) - 0.02)
@@ -97,11 +97,11 @@ def render_xgboost(data):
                              for c in configs if c["n_estimators"] == n])
         base_heat = alt.Chart(heat).encode(x=alt.X("Learning rate:O"), y=alt.Y("Max depth:O", sort="descending"))
         st.altair_chart(
-            (base_heat.mark_rect().encode(color=alt.Color("Test F2:Q", scale=alt.Scale(scheme="blues"), legend=None),
+            (base_heat.mark_rect().encode(color=alt.Color("Test F2:Q", scale=alt.Scale(range=["#16283f", "#5fc4c0"]), legend=None),
                                           tooltip=["Max depth", "Learning rate", alt.Tooltip("Test F2:Q", format=".3f")])
              + base_heat.mark_text(fontSize=13).encode(text=alt.Text("Test F2:Q", format=".3f"),
                                                       color=alt.condition("datum['Test F2'] > " + str(heat["Test F2"].median()),
-                                                                          alt.value("white"), alt.value("black"))))
+                                                                          alt.value("#0e1a2b"), alt.value("#f2f5f9"))))
             .properties(height=200, title=f"Test F2 with {n} trees"), width="stretch")
         best = max(configs, key=lambda c: sum(c["targets"][t]["val_f2"] for t in TARGET_LABELS))
         st.caption(f"Best on **validation** for this feature set: {best['n_estimators']} trees, depth {best['max_depth']}, "
@@ -110,7 +110,7 @@ def render_xgboost(data):
                    "not on the test scores shown here.")
     with right:
         imp = pd.DataFrame(cfg["targets"][target]["importance"], columns=["Feature", "Share of gain"])
-        st.altair_chart(alt.Chart(imp).mark_bar(color="#2a78d6", cornerRadiusEnd=3).encode(
+        st.altair_chart(alt.Chart(imp).mark_bar(color="#5fc4c0", cornerRadiusEnd=3).encode(
             x=alt.X("Share of gain:Q", axis=alt.Axis(format="%")), y=alt.Y("Feature:N", sort="-x", title=None),
             tooltip=["Feature", alt.Tooltip("Share of gain:Q", format=".1%")]).properties(
             height=230, title="What the model relies on (top 8 features)"), width="stretch")
@@ -124,10 +124,10 @@ def graph_chart(edges, components):
     x_axis, y_axis = alt.X("x:Q", axis=None, scale=alt.Scale(domain=[-0.5, 5.5])), alt.Y("y:Q", axis=None, scale=alt.Scale(domain=[-1.8, 1.6]))
     layers = []
     if edge_rows:
-        layers.append(alt.Chart(pd.DataFrame(edge_rows)).mark_line(color="#9aa4ae", strokeWidth=1, opacity=0.6)
+        layers.append(alt.Chart(pd.DataFrame(edge_rows)).mark_line(color="#3c5a7d", strokeWidth=1, opacity=0.6)
                       .encode(x=x_axis, y=y_axis, detail="edge:N"))
-    layers.append(alt.Chart(nodes).mark_circle(size=520, opacity=1, stroke="white", strokeWidth=2).encode(
-        x=x_axis, y=y_axis, color=alt.Color("Component:N", legend=alt.Legend(orient="bottom", title=None)),
+    layers.append(alt.Chart(nodes).mark_circle(size=520, opacity=1, stroke="#0e1a2b", strokeWidth=2).encode(
+        x=x_axis, y=y_axis, color=alt.Color("Component:N", scale=alt.Scale(range=["#5fc4c0", "#f0a742", "#7fa6d1", "#a99bd6", "#e5736b", "#f0c96a"]), legend=alt.Legend(orient="bottom", title=None)),
         tooltip=["Sensor", "Component"]))
     layers.append(alt.Chart(nodes).mark_text(dy=-20, fontSize=12, fontWeight="bold").encode(x=x_axis, y=y_axis, text="Sensor"))
     return alt.layer(*layers).properties(height=340)

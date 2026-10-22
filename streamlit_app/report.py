@@ -89,7 +89,7 @@ DATABRICKS_QUERIES = {
     """,
 }
 STAGE_ORDER = ["Healthy", "Early warning", "Critical action"]
-FAULT_COLORS = alt.Scale(domain=["HPC degradation", "HPC and fan degradation"], range=["#2a78d6", "#eb6834"])
+FAULT_COLORS = alt.Scale(domain=["HPC degradation", "HPC and fan degradation"], range=["#5fc4c0", "#f0a742"])
 
 
 def sql_list(values):

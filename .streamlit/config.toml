@@ -1,0 +1,41 @@
+# Theme from Branding/assets/streamlit-config.toml (see Branding/brand-guide.md): navy ground,
+# teal for the main line of sight and the primary action, amber for the one thing to look at.
+[theme]
+base = "dark"
+primaryColor = "#5fc4c0"
+backgroundColor = "#0e1a2b"
+secondaryBackgroundColor = "#1a2f4a"
+textColor = "#f2f5f9"
+linkColor = "#5fc4c0"
+linkUnderline = false
+borderColor = "#3a5373"
+showWidgetBorder = true
+baseRadius = "6px"
+buttonRadius = "6px"
+
+# Brand type: Segoe UI, Open Sans fallback, headings at 600.
+font = "'Segoe UI', 'Open Sans':https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700&display=swap"
+headingFont = "'Segoe UI', 'Open Sans':https://fonts.googleapis.com/css2?family=Open+Sans:wght@600;700&display=swap"
+codeFont = "'Cascadia Code', 'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+codeFontSize = "0.85rem"
+codeBackgroundColor = "#0a1422"
+codeTextColor = "#cfe0f2"
+baseFontSize = 15
+headingFontWeights = [600, 600, 600, 600, 500, 500]
+headingFontSizes = ["32px", "24px", "19px", "16px", "14px", "12px"]
+
+# Named colours used in markdown and status messages.
+orangeColor = "#f0a742"
+greenColor = "#5fc4c0"
+blueColor = "#7fa6d1"
+grayColor = "#6f86a3"
+redColor = "#e5736b"
+yellowColor = "#f0c96a"
+violetColor = "#a99bd6"
+
+[client]
+toolbarMode = "minimal"
+showSidebarNavigation = false
+
+[browser]
+gatherUsageStats = false
