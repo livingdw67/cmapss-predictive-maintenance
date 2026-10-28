@@ -1,0 +1,64 @@
+# Raw NASA files, downloaded by ../01_fetch_data.py into the repo's data/raw (git-ignored).
+# Whitespace-delimited with trailing spaces and no header. One factory covers train_ and test_ x FD001-4.
+"{split}_{dataset}":
+  type: pandas.CSVDataset
+  filepath: ../data/raw/{split}_{dataset}.txt
+  load_args:
+    sep: '\s+'
+    header: null
+
+"RUL_{dataset}":
+  type: pandas.CSVDataset
+  filepath: ../data/raw/RUL_{dataset}.txt
+  load_args:
+    header: null
+
+# Intermediate and feature tables
+"{name}_telemetry":
+  type: pandas.ParquetDataset
+  filepath: data/02_intermediate/{name}_telemetry.parquet
+
+test_rul_truth:
+  type: pandas.ParquetDataset
+  filepath: data/02_intermediate/test_rul_truth.parquet
+
+model_input:
+  type: pandas.ParquetDataset
+  filepath: data/04_feature/model_input.parquet
+
+latest_test_features:
+  type: pandas.ParquetDataset
+  filepath: data/04_feature/latest_test_features.parquet
+
+# One entry per namespace (early_warning, critical_action). The models must be persisted: kedro-mlflow
+# packages them as artifacts of the inference model.
+"{target}.model":
+  type: pickle.PickleDataset
+  filepath: data/06_models/{target}.pkl
+
+"{target}.metrics":
+  type: kedro_mlflow.io.metrics.MlflowMetricsHistoryDataset
+  prefix: "{target}"
+
+"{target}.strategy_comparison":
+  type: kedro_mlflow.io.artifacts.MlflowArtifactDataset
+  dataset:
+    type: pandas.CSVDataset
+    filepath: data/08_reporting/{target}_strategy_comparison.csv
+    save_args:
+      index: false
+
+risk_scores:
+  type: pandas.ParquetDataset
+  filepath: data/07_model_output/risk_scores.parquet
+
+fleet_metrics:
+  type: kedro_mlflow.io.metrics.MlflowMetricsHistoryDataset
+
+action_summary:
+  type: kedro_mlflow.io.artifacts.MlflowArtifactDataset
+  dataset:
+    type: pandas.CSVDataset
+    filepath: data/08_reporting/action_summary.csv
+    save_args:
+      index: false

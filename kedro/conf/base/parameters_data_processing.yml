@@ -1,0 +1,2 @@
+# Piecewise RUL: remaining life is capped here because healthy engines look alike far from failure
+rul_cap: 130

@@ -1,0 +1,8 @@
+kedro~=1.7.0
+kedro-datasets[pandas-csvdataset,pandas-parquetdataset,pickle-pickledataset]~=9.6
+kedro-mlflow~=2.0.3
+mlflow>=3.0
+pandas
+scikit-learn
+xgboost
+pytest
