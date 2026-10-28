@@ -150,6 +150,10 @@ databricks bundle deploy
 databricks bundle run cmapss_pipeline
 ```
 
+## Kedro Pipeline: Local, Modular, Tracked with MLflow
+
+[`kedro/`](kedro/) rebuilds the same transform → train → score job as a Kedro 1.7 project that runs locally in about 15 seconds. Each step is a pure function, the data flow is declared in a catalog, and every setting is in YAML parameters. One classifier pipeline is instantiated under two namespaces (`early_warning`, `critical_action`). [kedro-mlflow](https://github.com/Galileo-Galilei/kedro-mlflow) logs parameters, metrics and reports for each run. It also packages the scoring pipeline with both trained models as one registered MLflow model (`pipeline_ml_factory`). On the NASA test engines, Early Warning recall is 0.930 (95% Wilson interval 0.890–0.957) and Critical Action recall is 0.912 (0.841–0.953). Both intervals include the Databricks figures above. See its [README](kedro/README.md).
+
 ## Run It
 
 ```bash
@@ -165,7 +169,7 @@ To run the full Snowflake pipeline, set up [key-pair authentication](https://doc
 
 ## Technology Stack
 * **Data Platform:** Snowflake (SQL, Snowpark ML); Databricks (Delta Lake, Unity Catalog, MLflow, Jobs, Asset Bundles)
-* **Orchestration & Extraction:** Python, `snowflake-connector-python`
+* **Orchestration & Extraction:** Python, `snowflake-connector-python`, Kedro + kedro-mlflow
 * **Data Science & ML:** `xgboost`, `pandas`, `scikit-learn`, `matplotlib`
 * **Deep Learning:** PyTorch, PyTorch Geometric (GATv2), GRU sequence encoders
 * **Reliability & Survival Analysis:** `lifelines` (Weibull, Kaplan–Meier, log-rank), `scipy`
@@ -177,6 +181,7 @@ To run the full Snowflake pipeline, set up [key-pair authentication](https://doc
 ├── .gitignore                  # Security and environment exclusions
 ├── README.md                   # Project documentation
 ├── databricks/                 # Databricks Asset Bundle: ingest, transform, MLflow training, batch scoring
+├── kedro/                      # Kedro + kedro-mlflow version of transform, training and scoring
 ├── 01_fetch_data.py            # Retrieves the raw NASA CMAPSS dataset
 ├── 02_upload_to_snowflake.py   # Securely PUTs local data to internal Snowflake stage
 ├── 03_load_raw_table.py        # Executes COPY INTO commands for the RAW layer

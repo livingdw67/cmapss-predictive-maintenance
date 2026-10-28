@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+requires-python = ">=3.10"
+name = "cmapss_kedro"
+readme = "README.md"
+dynamic = ["version", "dependencies"]
+
+[project.scripts]
+cmapss-kedro = "cmapss_kedro.__main__:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "cmapss_kedro.__version__" }
+dependencies = { file = "requirements.txt" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+namespaces = false
+
+[tool.kedro]
+package_name = "cmapss_kedro"
+project_name = "cmapss-kedro"
+kedro_init_version = "1.7.0"
+tools = "['None']"
+example_pipeline = "False"
+source_dir = "src"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

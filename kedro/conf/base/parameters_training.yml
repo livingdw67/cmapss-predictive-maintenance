@@ -1,0 +1,26 @@
+# Engine-level split, stratified by lifespan (max cycle) bucket
+split:
+  validation_share: 0.2
+  test_share: 0.2
+  lifespan_bins: [0, 200, 300, 400, 600]
+  seed: 42
+
+xgboost:
+  n_estimators: 300
+  max_depth: 7
+  learning_rate: 0.08
+  eval_metric: aucpr
+  random_state: 42
+  n_jobs: -1
+
+# Candidate alert thresholds, scored by F2 on validation engines
+threshold_grid:
+  start: 0.05
+  stop: 0.95
+  step: 0.01
+
+# Namespaced: the training template reads params:horizon as params:<namespace>.horizon
+early_warning:
+  horizon: 50
+critical_action:
+  horizon: 15

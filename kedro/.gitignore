@@ -1,0 +1,10 @@
+conf/local/**
+!conf/local/.gitkeep
+conf/**/*credentials*
+.telemetry
+data/
+mlruns/
+mlartifacts/
+mlflow.db
+*.egg-info/
+.viz
