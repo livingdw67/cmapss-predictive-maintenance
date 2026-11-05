@@ -7,7 +7,7 @@ import os
 import sys
 import time
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import altair as alt
 import pandas as pd
@@ -29,6 +29,11 @@ SNAPSHOT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "report
 # Databricks Free Edition has a daily compute quota shared with the pipeline, so questions are capped
 DAILY_LIMIT = 50
 SESSION_LIMIT = 10
+# Only a question touches Databricks; loading or rerunning the page never does. Any query wakes the
+# serverless warehouse for its 10-minute auto-stop, and on 2026-11-05 a page rerunning every 5 minutes
+# kept it on for 19 hours and used up the daily quota. After a failed connection, questions stay off
+# for this long so later visitors see the notice without trying (and waking the warehouse) again.
+RETRY_AFTER_FAILURE = timedelta(minutes=15)
 MAX_QUESTION_CHARS = 300
 MAX_ROWS = 1000
 SUGGESTIONS = [
@@ -46,20 +51,29 @@ class SetupError(Exception):
     """A configuration problem the app owner can fix; the message never contains secret values."""
 
 
-@st.cache_resource
-def get_client():
-    # Each step fails with its own message so a misconfigured deploy says what to fix
+def secrets_problem():
+    """What is wrong with the app's secrets, or None. Makes no network calls."""
     try:
         has_section = "databricks" in st.secrets
     except Exception:  # no secrets configured at all
         has_section = False
     if not has_section:
-        raise SetupError("The app's secrets have no [databricks] section. Paste the secrets file "
-                         "into the app's Settings > Secrets on Streamlit Community Cloud.")
+        return ("The app's secrets have no [databricks] section. Paste the secrets file "
+                "into the app's Settings > Secrets on Streamlit Community Cloud.")
     cfg = st.secrets["databricks"]
     missing = [k for k in ("host", "client_id", "client_secret", "warehouse_id", "genie_space_id") if not cfg.get(k)]
     if missing:
-        raise SetupError(f"The [databricks] secrets are missing: {', '.join(missing)}.")
+        return f"The [databricks] secrets are missing: {', '.join(missing)}."
+    return None
+
+
+@st.cache_resource
+def get_client():
+    # Each step fails with its own message so a misconfigured deploy says what to fix
+    problem = secrets_problem()
+    if problem:
+        raise SetupError(problem)
+    cfg = st.secrets["databricks"]
     try:
         client = WorkspaceClient(host=cfg["host"], client_id=cfg["client_id"], client_secret=cfg["client_secret"])
         client.current_user.me()
@@ -117,6 +131,44 @@ def fetch_snapshot(sql):
 
 def questions_used_today():
     return int(fetch(f"SELECT COUNT(*) FROM {QUESTION_LOG} WHERE asked_at >= current_date()").iloc[0, 0])
+
+
+@st.cache_resource
+def shared_state():
+    """Shared by every visitor: today's question count as last read, and the last connection failure."""
+    return {"day": None, "used": None, "failed_at": None, "error": None}
+
+
+def utc_today():
+    # The question log counts from current_date() on the warehouse, which runs in UTC
+    return datetime.now(timezone.utc).date()
+
+
+def known_used_today():
+    """Questions used today as of the last question asked, or None if nobody has asked one yet today."""
+    state = shared_state()
+    return state["used"] if state["day"] == utc_today() else None
+
+
+def owner_detail(e):
+    return str(e) if isinstance(e, SetupError) else f"{type(e).__name__}: {str(e)[:200]}"
+
+
+def ask(question):
+    """Check the daily limit, then answer. Returns None when the question can't be asked."""
+    state = shared_state()
+    try:
+        used = questions_used_today()
+    except Exception as e:
+        state["failed_at"], state["error"] = time.time(), owner_detail(e)
+        return None
+    state["failed_at"] = None
+    state["day"], state["used"] = utc_today(), used
+    if used >= DAILY_LIMIT:
+        return None
+    record = answer(question)
+    state["used"] = used + 1
+    return record
 
 
 def log_question(question, status, sql, row_count, latency_ms):
@@ -242,21 +294,27 @@ st.markdown(
 ask_tab, report_tab, model_tab, how_tab = st.tabs(["Ask a question", "Fleet report", "Modeling", "How it works"])
 
 with ask_tab:
-    connected = True
-    try:
-        used_today = questions_used_today()
-    except Exception as e:
-        connected, used_today = False, 0
+    # Nothing here calls Databricks: the secrets check is local, and the count and any connection
+    # failure are the ones the last question saw
+    state = shared_state()
+    problem = secrets_problem()
+    failed_recently = state["failed_at"] is not None and \
+        time.time() - state["failed_at"] < RETRY_AFTER_FAILURE.total_seconds()
+    connected = problem is None and not failed_recently
+    if not connected:
         st.error("The demo can't reach Databricks right now, so questions are turned off. Please try again later.")
         with st.expander("Details for the app owner"):
-            st.write(str(e) if isinstance(e, SetupError) else f"{type(e).__name__}: {str(e)[:200]}")
-    left_today = max(0, DAILY_LIMIT - used_today)
+            st.write(problem or state["error"])
+    used_today = known_used_today()
+    left_today = None if used_today is None else max(0, DAILY_LIMIT - used_today)
     left_session = max(0, SESSION_LIMIT - st.session_state.asked)
-    can_ask = connected and left_today > 0 and left_session > 0
+    can_ask = connected and left_session > 0 and left_today != 0
 
     if connected:
-        st.caption(f"{left_today} of {DAILY_LIMIT} questions left today across all visitors · "
-                   f"{left_session} of {SESSION_LIMIT} left for you. Questions are logged to improve the demo.")
+        shared = (f"Up to {DAILY_LIMIT} questions a day across all visitors" if left_today is None
+                  else f"{left_today} of {DAILY_LIMIT} questions left today across all visitors")
+        st.caption(f"{shared} · {left_session} of {SESSION_LIMIT} left for you. "
+                   "Questions are logged to improve the demo.")
         if not can_ask:
             st.warning("The question limit has been reached. It resets at midnight UTC. "
                        "The Fleet report tab still works.")
@@ -276,9 +334,10 @@ with ask_tab:
     st.session_state.pending = None
     if question and can_ask:
         with st.spinner("Asking Genie..."):
-            record = answer(question.strip()[:MAX_QUESTION_CHARS])
-        st.session_state.history.append(record)
-        st.rerun()
+            record = ask(question.strip()[:MAX_QUESTION_CHARS])
+        if record is not None:
+            st.session_state.history.append(record)
+        st.rerun()  # shows the answer, or the notice for a failed connection or a used-up daily limit
 
 with report_tab:
     try:
