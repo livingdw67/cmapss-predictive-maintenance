@@ -1,45 +1,39 @@
-# Definition-Driven Predictive Maintenance Pipeline
+# Predictive Maintenance on a Governed Semantic Layer
 
-An end-to-end data engineering and machine learning feature store built on Snowflake. This project demonstrates how to process raw aerospace telemetry data into mathematically transformed, ML-ready features for predictive maintenance.
+Tandem XGBoost classifiers flag NASA C-MAPSS turbofan engines 50 and 15 cycles before failure, catching about 91% of failures on held-out engines. One Snowflake semantic view feeds a Streamlit report, Cortex Analyst and an MCP server under a read-only role, with all 80 metrics reconciled against hand-written SQL. The same pipeline runs on Databricks (a Unity Catalog feature table, MLflow champion models and the metric views behind a Genie space) and as a Kedro project that runs locally in 15 seconds.
 
-**[Try it live: Ask the Fleet →](https://ask-the-fleet.streamlit.app)** Ask the engine fleet questions in plain English, explore the fleet report, and tune the XGBoost and GNN models. No setup needed. The live app runs on Databricks (Genie over Unity Catalog metric views); the [guided tour of the semantic layer](https://claude.ai/artifact/Ai1U6EospZRsTgpSU9TxBL#tour) walks through the original Snowflake build.
+**[Try it live: Ask the Fleet →](https://ask-the-fleet.streamlit.app)** Ask 709 engines a question in plain English, explore the fleet report, and tune the XGBoost and GNN models. No sign-in. Questions go to a Databricks Genie space over Unity Catalog metric views; the [guided tour of the semantic layer](https://claude.ai/artifact/Ai1U6EospZRsTgpSU9TxBL#tour) walks through the original Snowflake build.
 
-## Business Objective
-Unexpected hardware failure in aviation and heavy industry carries catastrophic costs. This pipeline ingests run-to-failure sensor data from the NASA CMAPSS (Turbofan Engine Degradation) dataset and builds a foundation for **Condition-Based Maintenance**.
+## Results
 
-By calculating rolling window metrics and defining a Piecewise Remaining Useful Life (RUL) target variable, this architecture allows machine learning models to accurately predict failures before they happen, minimizing unplanned downtime and optimizing supply chain logistics.
-
-## The 5-Schema Snowflake Architecture
-This project implements a rigorous, definition-driven data platform decoupled into five distinct layers:
-
-1. **RAW:** Ingestion of flat, space-delimited text logs directly from the internal stage.
-2. **STAGING:** Type-casting, standardizing arbitrary column names to physical engine components (e.g., High-Pressure Compressor Temperature), and building a dataset-aware engine key (`FD002_001`), since engine numbers restart in each of the four source files.
-3. **CORE:** Relational modeling (Star Schema) splitting static entities (`DIM_ENGINE`) from time-series events (`FCT_TELEMETRY`).
-4. **MARTS:** Application of business logic to calculate the target variable: a piecewise-capped Remaining Useful Life (RUL) to prevent overfitting on healthy engines.
-5. **FEATURE STORE:** Push-down compute utilizing SQL Window Functions to generate 5-cycle rolling moving averages and standard deviations, dramatically increasing the signal-to-noise ratio for downstream ML models.
-
-## Machine Learning: Tandem Binary Classifiers
-To operationalize the feature store, this project includes a complete modeling workflow utilizing Snowpark and XGBoost:
-
-* **Dual-Model Strategy:** Deploys a tandem approach predicting both an *Early Warning* (≤50 cycles) and *Critical Action* (≤15 cycles) state to drive specific maintenance protocols.
-* **F2-Optimized Thresholds:** Prioritizes recall to minimize costly missed failures, leveraging the F-beta score (beta=2) to dynamically tune decision thresholds.
-* **Honest Evaluation:** Engines are split 60/20/20 into train, validation, and test sets. Thresholds and strategies are chosen on validation engines; test engines are scored once.
-* **Class Imbalance Experimentation:** Compares manual SMOTE, 6x undersampling, and `scale_pos_weight`. All three land within about 0.01 F2, so the simplest option (`scale_pos_weight`) is preferred.
-* **Model Registry:** Demonstrates MLOps best practices by versioning and logging champion models directly into Snowflake's native ML Registry.
-
-### Results (held-out test engines)
+Engines are split 60/20/20 into train, validation and test. Thresholds are chosen on validation engines to maximize F2 (recall weighted four times precision, because a missed failure costs far more than an early inspection); test engines are scored once.
 
 | Model | Recall | Precision | F2 |
 |-------|--------|-----------|----|
 | Early Warning (≤ 50 cycles) | 0.917 | 0.679 | 0.857 |
 | Critical Action (≤ 15 cycles) | 0.908 | 0.636 | 0.837 |
 
-**[Full experiment results](results.md)**
+* **Class imbalance:** manual SMOTE, 6x undersampling and `scale_pos_weight` land within about 0.01 F2 of each other, so the simplest option (`scale_pos_weight`) is used.
+* **Better inputs beat deep learning:** normalizing sensors within each operating condition and giving the model 14 sensors with 30 cycles of history lifts XGBoost to 0.931 F2. A graph neural network on the same inputs ties it ([below](#graph-neural-network-sensors-as-a-graph)).
+* **The semantic layer is checked, not assumed:** 80 of 80 metrics reconcile with independent SQL, and Cortex Analyst scores 594/600 on 200 fresh questions.
 
+The full experiment log is in [results.md](results.md).
 
-## Reliability Analysis: Weibull Fleet Model
+## The Snowflake pipeline
 
-The classifiers decide *which engine* to pull. **[09_weibull_reliability_analysis.ipynb](09_weibull_reliability_analysis.ipynb)** answers the fleet-planning questions: how long engines last, how failure risk grows with age, and when monitoring must be in place.
+Five schemas, each with one job:
+
+1. **RAW:** space-delimited NASA logs loaded from an internal stage.
+2. **STAGING:** typed columns named for physical components (High-Pressure Compressor Temperature, not `s3`), and an engine key that carries the dataset (`FD002_001`), since engine numbers restart in each of the four source files.
+3. **CORE:** a star schema splitting static entities (`DIM_ENGINE`) from time-series events (`FCT_TELEMETRY`).
+4. **MARTS:** the target, a piecewise-capped Remaining Useful Life (RUL), so healthy engines don't dominate training.
+5. **FEATURE STORE:** 5-cycle rolling means and standard deviations computed with SQL window functions, in the warehouse.
+
+The classifiers train in Snowpark and are versioned in Snowflake's Model Registry ([08_build_register_classifiers.ipynb](08_build_register_classifiers.ipynb)).
+
+## Fleet reliability: Weibull model
+
+The classifiers decide *which engine* to pull. [09_weibull_reliability_analysis.ipynb](09_weibull_reliability_analysis.ipynb) answers the fleet-planning questions: how long engines last, how failure risk grows with age, and when monitoring must be in place.
 
 * **Wear-out failure:** Weibull shape β = 2.9–4.4 across datasets (β > 1 means risk rises with age). Characteristic life η ≈ 225 cycles (one fault mode) and ≈ 274 cycles (two fault modes); B10 life ≈ 135–140 cycles.
 * **Fault modes matter, operating conditions don't:** log-rank tests show no lifetime difference across 1 vs. 6 operating conditions (p = 0.73–0.87), but engines with two fault modes live longer and less predictably (p < 0.001), so the fleet is planned as two populations.
@@ -47,17 +41,17 @@ The classifiers decide *which engine* to pull. **[09_weibull_reliability_analysi
 * **Censoring trap:** treating the truncated test engines as ordinary censored data overstates characteristic life by **5–15%**, because each trajectory was cut off at a random fraction of that engine's own life (censoring age correlates 0.56–0.88 with true life). A simulation confirms the mechanism: unbiased under independent censoring, biased when censoring tracks lifetime.
 * **Age vs. sensors:** age alone flags engines within 50 cycles of failure with AUC 0.72–0.86 and misses remaining life by 33–55 cycles on average, which is why sensor-based condition monitoring drives individual removals and Weibull sets the fleet-level window.
 
-## Semantic Layer: Governed Fleet Metrics
+## Semantic layer: governed fleet metrics
 
-**[Take the tour of the Fleet Reliability semantic layer →](https://claude.ai/artifact/Ai1U6EospZRsTgpSU9TxBL#tour)** A 10-step guided walk-through of the model, metrics, validation, Cortex Analyst eval and MCP server.
+**[Take the tour →](https://claude.ai/artifact/Ai1U6EospZRsTgpSU9TxBL#tour)** A 10-step walk-through of the model, metrics, validation, Cortex Analyst eval and MCP server.
 
 [![Fleet Reliability semantic layer: governed metrics in Snowflake feeding a Streamlit report, Cortex Analyst and an MCP server, and the Databricks port with Unity Catalog metric views and Genie](docs/images/semantic-layer.png)](https://claude.ai/artifact/Ai1U6EospZRsTgpSU9TxBL)
 
-**[11_build_semantic_view.py](11_build_semantic_view.py)** adds a `SEMANTIC` schema with a Snowflake semantic view, `FLEET_RELIABILITY`, so BI tools, Cortex Analyst and agents all read the same metric definitions instead of each re-deriving "mean time to failure" in their own SQL.
+[11_build_semantic_view.py](11_build_semantic_view.py) adds a `SEMANTIC` schema with a Snowflake semantic view, `FLEET_RELIABILITY`, so BI tools, Cortex Analyst and agents all read the same metric definitions instead of each re-deriving "mean time to failure" in their own SQL.
 
 * **Three grains:** datasets (operating conditions and fault modes from NASA's readme), engines (one row per engine with its failure cycle), and cycles (`MART_ENGINE_LIFESPAN`). Each metric aggregates at its own grain, so engine counts never fan out to telemetry row counts.
 * **Metrics:** engine count, mean/median/min/max time to failure and its spread, cycles flown, share of cycles in the early-warning and critical windows, average sensor readings, and HPC/LPT temperature rise from the first 20 cycles to the critical window.
-* **Business logic from the existing models:** the `health_stage` dimension uses the classifiers' horizons (RUL ≤ 50 early warning, ≤ 15 critical action), so a question asked in plain English uses the same definitions as the deployed models.
+* **Business logic from the deployed models:** the `health_stage` dimension uses the classifiers' horizons (RUL ≤ 50 early warning, ≤ 15 critical action), so a question asked in plain English uses the same definitions as the deployed models.
 * **Context for natural-language queries:** synonyms (MTTF, T30, failure mode), descriptions with units, and SQL-generation instructions warning that raw sensor levels are not comparable across operating conditions.
 
 | Operating conditions | Fault modes | Engines | MTTF (cycles) | Shortest life | HPC temp rise (°R) |
@@ -72,14 +66,14 @@ MTTF splits by fault mode, not by operating conditions, matching the Weibull log
 **Checked, reported and served to agents:**
 * **Reconciliation:** [12_validate_metrics.py](12_validate_metrics.py) recomputes every metric with hand-written SQL on STAGING, below anything the view reads. All 80 values (16 metrics × fleet and 4 datasets) match, a deliberate one-cycle threshold error is caught, and a Weibull fit lands within 0.6% of the view's MTTF. Exits non-zero on any mismatch.
 * **Report:** [streamlit_app/fleet_report.py](streamlit_app/fleet_report.py) is a Streamlit in Snowflake app that reads only from the view. [13_deploy_fleet_report.py](13_deploy_fleet_report.py) runs every app query, filtered and unfiltered, before deploying.
-* **Cortex Analyst eval:** [14_eval_cortex_analyst.py](14_eval_cortex_analyst.py) asks 25 questions 3 times each and scores the returned rows against independent SQL: 75/75 correct. The first pass found a real modeling flaw: a filter value of `'Single (sea level)'` that the model queried as `'Single'`. The fix went into the view. Details in [results.md](results.md). A second set of [200 new questions](cortex_analyst_eval_200/), with ground truth from `STAGING` rather than the view, scored 594/600 (99.0%) over 3 runs each. Most misses were Cortex returning both numbers in a comparison without subtracting them, fixed with one sentence in the view's instructions.
+* **Cortex Analyst eval:** [14_eval_cortex_analyst.py](14_eval_cortex_analyst.py) asks 25 questions 3 times each and scores the returned rows against independent SQL: 75/75 correct. The first pass found a real modeling flaw: a filter value of `'Single (sea level)'` that the model queried as `'Single'`. The fix went into the view. A second set of [200 new questions](cortex_analyst_eval_200/), with ground truth from `STAGING` rather than the view, scored 594/600 (99.0%) over 3 runs each. Most misses were Cortex returning both numbers in a comparison without subtracting them, fixed with one sentence in the view's instructions.
 * **MCP server:** [15_create_mcp_server.py](15_create_mcp_server.py) creates a Snowflake-managed MCP server (Cortex Analyst on the view, plus SQL execution) and a read-only `FLEET_READER` role for clients. The test asks a question over MCP, runs the returned SQL, and confirms that a write through the SQL tool is refused.
-* **Public demo, "Ask the Fleet":** [public_app/app.py](public_app/app.py), live at [ask-the-fleet.streamlit.app](https://ask-the-fleet.streamlit.app), is a Streamlit Community Cloud app where anyone can ask the fleet questions in plain English, plus the filterable fleet report. It first ran on Cortex Analyst over this semantic view, set up by [16_setup_public_demo.py](16_setup_public_demo.py) (a key-only service user, a read-only role, an extra-small warehouse with a 30-second query limit and a monthly credit cap). It now runs on Databricks: questions go to a Genie space over the equivalent Unity Catalog metric views (see [Databricks Port](#databricks-port-delta-mlflow-and-unity-catalog)). A question log enforces 50 questions a day (10 per visitor). Loading the page uses no compute: the log is read only when someone asks a question, so an open tab or a keep-awake visit can't keep the SQL warehouse running.
+* **Public demo, "Ask the Fleet":** [public_app/app.py](public_app/app.py), live at [ask-the-fleet.streamlit.app](https://ask-the-fleet.streamlit.app), is a Streamlit Community Cloud app where anyone can ask the fleet questions in plain English, plus the filterable fleet report. Questions go to a Databricks Genie space over the equivalent Unity Catalog metric views (see [Databricks port](#databricks-port-delta-mlflow-and-unity-catalog)). A question log enforces 50 questions a day (10 per visitor), and loading the page uses no compute: the log is read only when someone asks, so an open tab can't keep the SQL warehouse running. [16_setup_public_demo.py](16_setup_public_demo.py) is the Snowflake equivalent the demo ran on first: a key-only service user, a read-only role, an extra-small warehouse with a 30-second query limit and a monthly credit cap.
 * **Modeling tab:** visitors pick XGBoost features and hyperparameters (trees, depth, learning rate) with radio buttons, or a GNN graph type, and see test F2, recall, precision, F2 at every threshold, the tuning landscape and feature importance. [17_build_model_explorer.py](17_build_model_explorer.py) trains all 54 XGBoost settings ahead of time with the same F2 protocol (threshold chosen on validation engines, test engines scored once), checks that the default settings reproduce the published scores, and packages the saved GNN results.
 
-## Graph Neural Network: Sensors as a Graph
+## Graph neural network: sensors as a graph
 
-**[10_sensor_graph_gnn.py](10_sensor_graph_gnn.py)** treats each engine snapshot as a graph. The 14 informative sensors are nodes, each carrying its last 30 cycles of readings, normalized within its operating condition. A GRU encodes each sensor's history, two GATv2 attention layers pass messages between sensors, and a multitask head predicts RUL plus both maintenance flags. Same engine splits, same validation-tuned F2 thresholds, test engines scored once.
+[10_sensor_graph_gnn.py](10_sensor_graph_gnn.py) treats each engine snapshot as a graph. The 14 informative sensors are nodes, each carrying its last 30 cycles of readings, normalized within its operating condition. A GRU encodes each sensor's history, two GATv2 attention layers pass messages between sensors, and a multitask head predicts RUL plus both maintenance flags. Same engine splits, same validation-tuned F2 thresholds, test engines scored once.
 
 **Graph design.** Four edge sets, so the graph itself is tested rather than assumed:
 * **Physics:** sensors on the same component, on adjacent gas-path stages (fan → LPC → HPC → combustor → HPT → LPT), on the same shaft, or linked by bleed flows
@@ -87,7 +81,7 @@ MTTF splits by fault mode, not by operating conditions, matching the Weibull log
 * **Full:** every pair linked; attention must find the structure
 * **None:** self-loops only, so no message passing (ablation)
 
-### Results (held-out test engines; GNN rows are mean ± std over 3 seeds)
+Held-out test engines; GNN rows are mean ± std over 3 seeds:
 
 | Model | Early Warning F2 | Critical Action F2 | RUL RMSE (cycles) |
 |-------|------------------|--------------------|-------------------|
@@ -97,8 +91,6 @@ MTTF splits by fault mode, not by operating conditions, matching the Weibull log
 | GNN, correlation graph | **0.931** ± 0.001 | 0.934 ± 0.001 | 14.37 ± 0.16 |
 | GNN, physics graph | 0.930 ± 0.002 | 0.934 ± 0.002 | 14.30 ± 0.30 |
 | GNN, fully connected | 0.929 ± 0.003 | **0.936** ± 0.003 | 14.61 ± 0.21 |
-
-**Findings**
 
 * **Better inputs did most of the work.** Normalizing sensors within each operating condition, using 14 sensors instead of 3, and giving the model 30 cycles of history lifts XGBoost from 0.857 to 0.931 F2 (Early Warning) and from 0.837 to 0.929 (Critical Action), with no deep learning at all.
 * **The GNN ties a strong XGBoost; it does not beat it.** On identical inputs, the GNN matches Early Warning F2 and edges Critical Action by about 0.005 F2, trading some precision (0.79 vs 0.81) for recall (0.98 vs 0.96). RUL error is the same within noise (14.30 vs 14.24).
@@ -118,9 +110,9 @@ MTTF splits by fault mode, not by operating conditions, matching the Weibull log
 
 [Raw results for every seed](gnn_results.json), including recall, precision, PR-AUC, thresholds and the NASA asymmetric score.
 
-## Databricks Port: Delta, MLflow and Unity Catalog
+## Databricks port: Delta, MLflow and Unity Catalog
 
-The same pipeline also runs on Databricks (serverless) as one Asset Bundle in [`databricks/`](databricks/). A four-task Job does the following:
+The same pipeline also runs on Databricks (serverless) as one Asset Bundle in [databricks/](databricks/). A five-task Job does the following:
 
 1. **Ingest:** downloads the NASA archive into a Unity Catalog volume and loads the train and test files into bronze Delta tables.
 2. **Transform:** rebuilds staging, core, marts and the feature store as Delta tables with Spark SQL window functions. The feature table has a `(engine_id, cycle TIMESERIES)` primary key, so it is a Unity Catalog feature table.
@@ -128,7 +120,7 @@ The same pipeline also runs on Databricks (serverless) as one Asset Bundle in [`
 4. **Batch score:** loads both `@champion` models, scores the latest cycle of all 707 NASA test engines (histories cut off before failure) and writes `engine_risk_scores` with the tandem decision. NASA's true RUL for those engines is joined in for checking.
 5. **Semantic layer:** rebuilds the `FLEET_RELIABILITY` semantic view as two Unity Catalog metric views. `fleet_engines` has one row per engine (MTTF, median, shortest and longest life). `fleet_cycles` has one row per engine per cycle (health stage, sensor averages, temperature rise to failure). Splitting by grain keeps engine metrics from fanning out to cycle rows. The task fails if any key metric disagrees with plain SQL on the tables.
 
-The public **Ask the Fleet** app runs on this layer. Questions go to a Databricks Genie space over the metric views, carrying the Cortex Analyst instructions over unchanged. Genie runs its SQL as a service principal that can only read the metric views and write to the question log. The report tab is served from a snapshot of the metric views' own query results, so it uses no compute and keeps working when the Free Edition daily quota runs out. [`setup_public_demo.py`](databricks/setup_public_demo.py) creates the service principal, grants and Genie space, and [`export_report_snapshot.py`](databricks/export_report_snapshot.py) refreshes the snapshot.
+The public **Ask the Fleet** app runs on this layer. Questions go to a Databricks Genie space over the metric views, carrying the Cortex Analyst instructions over unchanged. Genie runs its SQL as a service principal that can only read the metric views and write to the question log. The report tab is served from a snapshot of the metric views' own query results, so it uses no compute and keeps working when the Free Edition daily quota runs out. [setup_public_demo.py](databricks/setup_public_demo.py) creates the service principal, grants and Genie space, and [export_report_snapshot.py](databricks/export_report_snapshot.py) refreshes the snapshot.
 
 Engine-level check on the NASA test engines, which played no part in training or model selection:
 
@@ -143,18 +135,20 @@ Engine-level check on the NASA test engines, which played no part in training or
 | Schedule maintenance | 169 | 54.4 | 90 | 9 |
 | Normal operations | 403 | 114.5 | 11 | 0 |
 
+The workspace host comes from the CLI profile, so log in once first:
+
 ```bash
 cd databricks
-databricks auth login --host <workspace-url>
-databricks bundle deploy
-databricks bundle run cmapss_pipeline
+databricks auth login --host <your workspace URL> --profile free
+databricks bundle deploy --profile free
+databricks bundle run cmapss_pipeline --profile free
 ```
 
-## Kedro Pipeline: Local, Modular, Tracked with MLflow
+## Kedro pipeline: local, modular, tracked with MLflow
 
-[`kedro/`](kedro/) rebuilds the same transform → train → score job as a Kedro 1.7 project that runs locally in about 15 seconds. Each step is a pure function, the data flow is declared in a catalog, and every setting is in YAML parameters. One classifier pipeline is instantiated under two namespaces (`early_warning`, `critical_action`). [kedro-mlflow](https://github.com/Galileo-Galilei/kedro-mlflow) logs parameters, metrics and reports for each run. It also packages the scoring pipeline with both trained models as one registered MLflow model (`pipeline_ml_factory`). On the NASA test engines, Early Warning recall is 0.930 (95% Wilson interval 0.890–0.957) and Critical Action recall is 0.912 (0.841–0.953). Both intervals include the Databricks figures above. See its [README](kedro/README.md).
+[kedro/](kedro/) rebuilds the same transform → train → score job as a Kedro 1.7 project that runs locally in about 15 seconds. Each step is a pure function, the data flow is declared in a catalog, and every setting is in YAML parameters. One classifier pipeline is instantiated under two namespaces (`early_warning`, `critical_action`). [kedro-mlflow](https://github.com/Galileo-Galilei/kedro-mlflow) logs parameters, metrics and reports for each run. It also packages the scoring pipeline with both trained models as one registered MLflow model (`pipeline_ml_factory`). On the NASA test engines, Early Warning recall is 0.930 (95% Wilson interval 0.890–0.957) and Critical Action recall is 0.912 (0.841–0.953). Both intervals include the Databricks figures above. See its [README](kedro/README.md).
 
-## Run It
+## Run it
 
 ```bash
 pip install -r requirements.txt
@@ -165,48 +159,27 @@ python 10_sensor_graph_gnn.py # GNN vs. XGBoost ablation (about 2.5 hours on 8 C
 pytest tests                  # Unit tests for windows, graphs and batching
 ```
 
-To run the full Snowflake pipeline, set up [key-pair authentication](https://docs.snowflake.com/en/user-guide/key-pair-auth) and add your Snowflake account details (with `SNOWFLAKE_PRIVATE_KEY_FILE` pointing at your private key) to a `.env` file and run scripts `02` through `07` in order, then the `08` notebook in Snowflake. Then build and check the semantic layer with scripts `11` through `15`: `11` builds the view, `12` reconciles every metric against independent SQL (exits non-zero on any mismatch), `13` pre-flights and deploys the Streamlit report, `14` runs the Cortex Analyst eval, and `15` creates the read-only role and MCP server and tests them end to end.
+To run the full Snowflake pipeline, set up [key-pair authentication](https://docs.snowflake.com/en/user-guide/key-pair-auth), put your account details in a `.env` file (with `SNOWFLAKE_PRIVATE_KEY_FILE` pointing at your private key), and run scripts `02` through `07` in order, then the `08` notebook in Snowflake. Then build and check the semantic layer with scripts `11` through `15`: `11` builds the view, `12` reconciles every metric against independent SQL (exits non-zero on any mismatch), `13` pre-flights and deploys the Streamlit report, `14` runs the Cortex Analyst eval, and `15` creates the read-only role and MCP server and tests them end to end.
 
-## Technology Stack
-* **Data Platform:** Snowflake (SQL, Snowpark ML); Databricks (Delta Lake, Unity Catalog, MLflow, Jobs, Asset Bundles)
-* **Orchestration & Extraction:** Python, `snowflake-connector-python`, Kedro + kedro-mlflow
-* **Data Science & ML:** `xgboost`, `pandas`, `scikit-learn`, `matplotlib`
-* **Deep Learning:** PyTorch, PyTorch Geometric (GATv2), GRU sequence encoders
-* **Reliability & Survival Analysis:** `lifelines` (Weibull, Kaplan–Meier, log-rank), `scipy`
-* **Environment Management:** `python-dotenv`
+## Stack and layout
 
-## Project Structure
+Snowflake (SQL, Snowpark ML, Model Registry, semantic views, Cortex Analyst, MCP) · Databricks (Delta Lake, Unity Catalog, MLflow, Jobs, Asset Bundles, Genie) · Kedro and kedro-mlflow · XGBoost, scikit-learn, pandas · PyTorch and PyTorch Geometric (GATv2, GRU encoders) · lifelines and SciPy · Streamlit
+
 ```text
-├── .env                        # Local Snowflake credentials (git-ignored)
-├── .gitignore                  # Security and environment exclusions
-├── README.md                   # Project documentation
-├── databricks/                 # Databricks Asset Bundle: ingest, transform, MLflow training, batch scoring
-├── kedro/                      # Kedro + kedro-mlflow version of transform, training and scoring
-├── 01_fetch_data.py            # Retrieves the raw NASA CMAPSS dataset
-├── 02_upload_to_snowflake.py   # Securely PUTs local data to internal Snowflake stage
-├── 03_load_raw_table.py        # Executes COPY INTO commands for the RAW layer
-├── 04_build_staging.py         # Type casting and column standardization
-├── 05_build_core.py            # Star schema generation (Dim/Fact tables)
-├── 06_build_marts.py           # RUL target variable calculation
-├── 07_build_feature_store.py   # Rolling window feature engineering via Window Functions
-├── 08_build_register_classifiers.ipynb    # XGBoost tandem classifiers & model registration
-├── 09_weibull_reliability_analysis.ipynb  # Weibull fleet reliability analysis
-├── 10_sensor_graph_gnn.py      # Sensor-graph GNN vs. XGBoost ablation
-├── 11_build_semantic_view.py   # Semantic view (FLEET_RELIABILITY) with governed fleet metrics
-├── 12_validate_metrics.py      # Reconciles every semantic-view metric against independent SQL + Weibull
-├── 13_deploy_fleet_report.py   # Pre-flights and deploys the Streamlit in Snowflake report
-├── 14_eval_cortex_analyst.py   # Cortex Analyst eval: 25 questions x 3 runs, scored on answers
-├── 15_create_mcp_server.py     # Read-only role + Snowflake-managed MCP server, tested end to end
-├── 16_setup_public_demo.py    # Service user, capped warehouse and question log for the public demo
-├── 17_build_model_explorer.py # Precomputes the public app's Modeling tab (XGBoost grid + GNN results)
-├── public_app/                 # "Ask the Fleet" app for Streamlit Community Cloud
-├── streamlit_app/              # Fleet report for Streamlit in Snowflake; report.py is shared with public_app
-├── docs/images/                # Screenshot of the semantic layer write-up used in this README
-├── cortex_analyst_eval.json    # Per-question eval results, generated SQL and latencies
-├── cortex_analyst_eval_200/    # 200 more questions with ground truth from STAGING, runner and results
-├── gnn/                        # Condition-normalized windows, sensor graphs, GATv2 model
-├── tests/                      # Unit tests for the GNN data and model code
-├── gnn_results.json            # Per-seed GNN and baseline results
-├── evaluate_local.py           # Snowflake-free reproduction of the pipeline and models
-├── results.md                  # Experiment results
-└── requirements.txt            # Python dependencies
+01–07_*.py                  Snowflake pipeline: fetch, stage, RAW → STAGING → CORE → MARTS → FEATURE STORE
+08_*.ipynb, 09_*.ipynb      Tandem classifiers and Model Registry; Weibull fleet reliability
+10_sensor_graph_gnn.py      Sensor-graph GNN vs. XGBoost ablation (gnn/ holds the windows, graphs and model)
+11–15_*.py                  Semantic view, metric reconciliation, report deploy, Cortex Analyst eval, MCP server
+16–17_*.py                  Public demo setup and the precomputed Modeling tab
+databricks/                 Asset Bundle: ingest, transform, MLflow training, batch scoring, metric views, Genie demo
+kedro/                      Kedro + kedro-mlflow version of transform, training and scoring
+public_app/                 "Ask the Fleet" for Streamlit Community Cloud; streamlit_app/ is the Streamlit in Snowflake report
+cortex_analyst_eval.json    Cortex Analyst eval: 25 questions × 3 runs, generated SQL and latencies
+cortex_analyst_eval_200/    200 more questions with ground truth from STAGING, runner and results
+results.md, gnn_results.json  Experiment log; per-seed GNN and baseline results
+tests/                      Unit tests for the GNN data and model code
+```
+
+## License
+
+Code: MIT ([LICENSE](LICENSE)). Data: NASA's C-MAPSS turbofan degradation dataset, from the Prognostics Center of Excellence data repository.
