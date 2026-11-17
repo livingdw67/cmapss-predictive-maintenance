@@ -22,7 +22,7 @@ It tests Cortex Analyst against the semantic view `PREDICTIVE_MAINTENANCE.SEMANT
   - `truth`: ground-truth SQL, run after the `truth_cte` at the top of the file
   - `expected`: rows that `truth` returned on 2026-10-12, already computed
   - optional `first_row` and `percent_ok` flags, used the same way as in `14_eval_cortex_analyst.py`
-- `gen_questions.py`: rebuilds the question JSON. Usage: `<repo>\.venv\Scripts\python gen_questions.py <out_dir>`.
+- `gen_questions.py`: rebuilds the question JSON. Usage, with the repo's venv active: `python gen_questions.py <out_dir>`.
 - `run_eval_200.py`: runs the eval and reuses `ask_analyst` and `score` from the repo's `14_eval_cortex_analyst.py`.
   - It saves after every question and skips questions already in the results file, so an interrupted run resumes.
   - `--only id1,id2` runs only those questions, and `--out name.json` writes to a different results file.
