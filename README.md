@@ -1,5 +1,7 @@
 # Predictive Maintenance on a Governed Semantic Layer
 
+[![tests](https://github.com/livingdw67/cmapss-predictive-maintenance/actions/workflows/tests.yml/badge.svg)](https://github.com/livingdw67/cmapss-predictive-maintenance/actions/workflows/tests.yml)
+
 Tandem XGBoost classifiers flag NASA C-MAPSS turbofan engines 50 and 15 cycles before failure, catching about 91% of failures on held-out engines. One Snowflake semantic view feeds a Streamlit report, Cortex Analyst and an MCP server under a read-only role, with all 80 metrics reconciled against hand-written SQL. The same pipeline runs on Databricks (a Unity Catalog feature table, MLflow champion models and the metric views behind a Genie space) and as a Kedro project that runs locally in 15 seconds.
 
 **[Try it live: Ask the Fleet →](https://ask-the-fleet.streamlit.app)** Ask 709 engines a question in plain English, explore the fleet report, and tune the XGBoost and GNN models. No sign-in. Questions go to a Databricks Genie space over Unity Catalog metric views; the [guided tour of the semantic layer](https://claude.ai/artifact/Ai1U6EospZRsTgpSU9TxBL#tour) walks through the original Snowflake build.
@@ -156,8 +158,10 @@ python 01_fetch_data.py       # Download NASA C-MAPSS into data/raw
 python evaluate_local.py      # Reproduce the feature store and models locally (no Snowflake needed)
 jupyter notebook 09_weibull_reliability_analysis.ipynb   # Fleet reliability analysis
 python 10_sensor_graph_gnn.py # GNN vs. XGBoost ablation (about 2.5 hours on 8 CPU cores; --quick for a 10-minute check)
-pytest tests                  # Unit tests for windows, graphs and batching
+python -m pytest tests        # Unit tests for windows, graphs and batching
 ```
+
+The GNN tests and the Kedro project's tests run on every push and pull request ([tests.yml](.github/workflows/tests.yml)).
 
 To run the full Snowflake pipeline, set up [key-pair authentication](https://docs.snowflake.com/en/user-guide/key-pair-auth), put your account details in a `.env` file (with `SNOWFLAKE_PRIVATE_KEY_FILE` pointing at your private key), and run scripts `02` through `07` in order, then the `08` notebook in Snowflake. Then build and check the semantic layer with scripts `11` through `15`: `11` builds the view, `12` reconciles every metric against independent SQL (exits non-zero on any mismatch), `13` pre-flights and deploys the Streamlit report, `14` runs the Cortex Analyst eval, and `15` creates the read-only role and MCP server and tests them end to end.
 

@@ -41,11 +41,12 @@ Raw data comes from the repo's `../01_fetch_data.py` (into `../data/raw`, git-ig
 ```
 cd kedro
 python -m venv .venv
-.venv\Scripts\python -m pip install -e .
-.venv\Scripts\kedro run                              # everything, ~15 s
-.venv\Scripts\kedro run --pipeline data_processing   # or one stage
-.venv\Scripts\kedro mlflow ui                        # http://127.0.0.1:5000
-.venv\Scripts\python -m pytest -q
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
+python -m pip install -e .
+kedro run                            # everything, ~15 s
+kedro run --pipeline data_processing # or one stage
+kedro mlflow ui                      # http://127.0.0.1:5000
+python -m pytest -q
 ```
 
 Tracking is a local SQLite file (`mlflow.db`, git-ignored); the registry needs a database backend.
